@@ -1,0 +1,39 @@
+{
+  "name": "auto-apply",
+  "version": "1.0.0",
+  "description": "auto-apply backend (node.js)",
+  "license": "ISC",
+  "author": "",
+  "type": "module",
+  "main": "app.ts",
+  "scripts": {
+    "dev": "tsx watch app.ts",
+    "build": "tsc",
+    "start": "node dist/app.js",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "express": "^5.2.1",
+    "google-auth-library": "^10.6.2",
+    "jsonwebtoken": "^9.0.3",
+    "postgres": "^3.4.9",
+    "resend": "^6.12.3"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^25.8.0",
+    "drizzle-kit": "^0.31.10",
+    "ts-node": "^10.9.2",
+    "tsx": "^4.22.1",
+    "typescript": "^6.0.3"
+  }
+}
