@@ -2,13 +2,19 @@ import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
-import { Resend } from 'resend';
+import nodemailer from 'nodemailer';
 import { eq } from 'drizzle-orm';
 import { db } from '../db/index.js';
 import { users, otps } from '../db/schema.js';
 
 const router = Router();
-const resend = new Resend(process.env.RESEND_API_KEY || 're_mock_key');
+const transporter = nodemailer.createTransport({
+  service: 'gmail',
+  auth: {
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD,
+  },
+});
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
@@ -42,14 +48,20 @@ router.post('/register', async (req: Request, res: Response): Promise<void> => {
     // Store OTP
     await db.insert(otps).values({ email, code, expiresAt });
 
-    // Send Email via Resend
-    if (process.env.RESEND_API_KEY) {
-      await resend.emails.send({
-        from: 'Acme <onboarding@resend.dev>', // Update this in production
-        to: email,
-        subject: 'Your Verification Code',
-        html: `<p>Your verification code is <strong>${code}</strong>. It expires in 10 minutes.</p>`,
-      });
+    // Send Email via Nodemailer
+    if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+      try {
+        await transporter.sendMail({
+          from: `"AutoApply" <${process.env.GMAIL_USER}>`,
+          to: email,
+          subject: 'Your Verification Code',
+          html: `<p>Your verification code is <strong>${code}</strong>. It expires in 10 minutes.</p>`,
+        });
+      } catch (emailError) {
+        console.error("Nodemailer failed to send email:", emailError);
+        res.status(500).json({ error: 'Failed to send verification email' });
+        return;
+      }
     } else {
       console.log(`Mock OTP for ${email}: ${code}`);
     }
