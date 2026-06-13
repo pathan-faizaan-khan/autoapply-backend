@@ -92,7 +92,7 @@ router.post('/campaigns/:id/automate', async (req: any, res) => {
       .where(eq(outreachCampaigns.id, campaignId));
 
     // Start background process (do not await)
-    runAutomationEngine(campaignId, targetEmailCount || 10, googleAccessToken, fastApiUrl || 'http://localhost:8000')
+    runAutomationEngine(campaignId, targetEmailCount || 10, googleAccessToken, fastApiUrl || 'https://autoapply-scraper-backend.onrender.com')
       .catch(e => console.error("Automation Engine Crash:", e));
 
     res.status(202).json({ message: 'Automation started', campaignId });
