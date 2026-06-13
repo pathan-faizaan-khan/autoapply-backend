@@ -174,7 +174,7 @@ export async function runAutomationEngine(
           const htmlContent = generateResumeHtml(tailored_resume);
           const browser = await puppeteer.launch({ headless: true });
           const page = await browser.newPage();
-          await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+          await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
           const uint8Array = await page.pdf({ format: 'A4', printBackground: true });
           pdfBuffer = Buffer.from(uint8Array);
           await browser.close();
