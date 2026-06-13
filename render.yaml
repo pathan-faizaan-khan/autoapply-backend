@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: auto-apply-backend
+    env: node
+    # The build command to install dependencies and compile TypeScript
+    buildCommand: "npm install && npm run build"
+    # The start command to run the compiled JavaScript
+    startCommand: "npm run start"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000" # Render sets this automatically, but it's good practice to specify
+      # Add all your secret environment variables below. 
+      # sync: false means you will provide the actual values in the Render Dashboard
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
