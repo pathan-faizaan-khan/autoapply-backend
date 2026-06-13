@@ -5,7 +5,7 @@ services:
     # The build command to install dependencies and compile TypeScript
     buildCommand: "npm install && npm run build"
     # The start command to run the compiled JavaScript
-    startCommand: "npm run start"
+    startCommand: "node dist/app.js"
     envVars:
       - key: NODE_ENV
         value: production
@@ -21,3 +21,5 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_ID
         sync: false
+      - key: PUPPETEER_CACHE_DIR
+        value: /opt/render/project/puppeteer
