@@ -9,20 +9,17 @@ import {
   resumeSkills,
   resumeProjects,
   resumeCertifications,
-  resumeLanguages
+  resumeLanguages,
+  userProfiles
 } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 
 const router = Router();
 
-// Helper to get userId (with fallback for testing without auth)
+// Helper to get userId
 const getUserId = (req: any) => {
-  return req.user?.userId || 1; // Default to user ID 1 if not authenticated
+  return req.user!.userId;
 };
-
-// We will use authenticateToken optionally or decode it manually if provided
-// For now, removing strict global middleware to allow unauthenticated access
-// router.use(authenticateToken);
 
 // ── GET: Fetch all resumes (with profile data) for the current user ──
 router.get('/', async (req: any, res) => {
@@ -71,7 +68,8 @@ router.post('/', async (req: any, res) => {
       s3Url, 
       fileName, 
       atsScore, 
-      parsedData // Expected: { name, email, phone, experience[], education[], skills[] }
+      parsedData, // Expected: { name, email, phone, experience[], education[], skills[] }
+      rawText
     } = req.body;
 
     // 1. Create the base resume record
@@ -163,6 +161,36 @@ router.post('/', async (req: any, res) => {
         proficiency: lang.proficiency || ''
       }));
       await db.insert(resumeLanguages).values(langValues);
+    }
+
+    // 9. Update User Profile
+    const [existingProfile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
+    const pi = parsedData?.personalInfo || {};
+    const skillsArr = Array.isArray(parsedData?.skills) ? parsedData.skills : [];
+    
+    if (!existingProfile) {
+      await db.insert(userProfiles).values({
+        userId,
+        linkedInUrl: pi.linkedin || '',
+        githubUrl: pi.github || '',
+        portfolioUrl: pi.portfolio || '',
+        phone: pi.phone || '',
+        address: '',
+        skills: skillsArr.join(', '),
+        resumeText: rawText || pi.summary || '',
+      });
+    } else {
+      const updates: any = {};
+      if (!existingProfile.linkedInUrl && pi.linkedin) updates.linkedInUrl = pi.linkedin;
+      if (!existingProfile.githubUrl && pi.github) updates.githubUrl = pi.github;
+      if (!existingProfile.portfolioUrl && pi.portfolio) updates.portfolioUrl = pi.portfolio;
+      if (!existingProfile.phone && pi.phone) updates.phone = pi.phone;
+      if (!existingProfile.skills && skillsArr.length > 0) updates.skills = skillsArr.join(', ');
+      if (!existingProfile.resumeText && (rawText || pi.summary)) updates.resumeText = rawText || pi.summary;
+      
+      if (Object.keys(updates).length > 0) {
+        await db.update(userProfiles).set(updates).where(eq(userProfiles.userId, userId));
+      }
     }
 
     res.status(201).json({ success: true, resumeId });

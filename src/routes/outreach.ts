@@ -19,7 +19,7 @@ import { runAutomationEngine } from '../utils/automationEngine.js';
 
 const router = Router();
 
-const getUserId = (req: any) => req.user?.userId || 1;
+const getUserId = (req: any) => req.user!.userId;
 
 // ─── CAMPAIGNS ───────────────────────────────────────────────────────────────
 

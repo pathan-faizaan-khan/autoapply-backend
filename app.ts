@@ -15,9 +15,12 @@ app.use(cors());
 app.use(express.json());
 
 app.use('/api/auth', authRoutes);
-app.use('/api/resumes', resumeRoutes);
-app.use('/api/jobs', jobsRoutes);
-app.use('/api/outreach', outreachRoutes);
+app.use('/api/resumes', authenticateToken, resumeRoutes);
+app.use('/api/jobs', authenticateToken, jobsRoutes);
+app.use('/api/outreach', authenticateToken, outreachRoutes);
+
+import profileRoutes from './src/routes/profile.js';
+app.use('/api/profile', authenticateToken, profileRoutes);
 
 // Example protected route
 app.get('/api/protected', authenticateToken, (req, res) => {
