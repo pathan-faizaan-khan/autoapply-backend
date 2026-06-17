@@ -1,7 +1,7 @@
 import express from 'express';
 import { db } from '../db/index.js';
-import { users, userProfiles } from '../db/schema.js';
-import { eq } from 'drizzle-orm';
+import { users, userProfiles, resumes, resumePersonalInfo, resumeSkills } from '../db/schema.js';
+import { eq, desc } from 'drizzle-orm';
 import { AuthRequest } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -22,7 +22,49 @@ router.get('/', async (req: AuthRequest, res) => {
     }
 
     // Get user profile
-    const [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
+    let [profile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
+
+    // Fallback to latest resume data if fields are missing
+    const [latestResume] = await db.select()
+      .from(resumes)
+      .where(eq(resumes.userId, userId))
+      .orderBy(desc(resumes.createdAt))
+      .limit(1);
+
+    if (latestResume) {
+      const [personalInfo] = await db.select()
+        .from(resumePersonalInfo)
+        .where(eq(resumePersonalInfo.resumeId, latestResume.id));
+      
+      const skillsRecords = await db.select()
+        .from(resumeSkills)
+        .where(eq(resumeSkills.resumeId, latestResume.id));
+      
+      const skillsStr = skillsRecords.map(s => s.name).join(', ');
+
+      if (!profile) {
+        profile = {
+          id: 0,
+          userId,
+          phone: personalInfo?.phone || null,
+          linkedInUrl: personalInfo?.linkedinUrl || null,
+          githubUrl: personalInfo?.githubUrl || null,
+          portfolioUrl: personalInfo?.portfolioUrl || null,
+          address: null,
+          skills: skillsStr || null,
+          resumeText: personalInfo?.summary || null,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        } as any;
+      } else {
+        if (!profile.phone && personalInfo?.phone) profile.phone = personalInfo.phone;
+        if (!profile.linkedInUrl && personalInfo?.linkedinUrl) profile.linkedInUrl = personalInfo.linkedinUrl;
+        if (!profile.githubUrl && personalInfo?.githubUrl) profile.githubUrl = personalInfo.githubUrl;
+        if (!profile.portfolioUrl && personalInfo?.portfolioUrl) profile.portfolioUrl = personalInfo.portfolioUrl;
+        if (!profile.skills && skillsStr) profile.skills = skillsStr;
+        if (!profile.resumeText && personalInfo?.summary) profile.resumeText = personalInfo.summary;
+      }
+    }
 
     res.json({
       name: user.name,
