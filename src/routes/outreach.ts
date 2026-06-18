@@ -16,6 +16,7 @@ import { eq, desc, and } from 'drizzle-orm';
 import puppeteer from 'puppeteer';
 import { generateResumeHtml } from '../utils/resumeTemplate.js';
 import { runAutomationEngine } from '../utils/automationEngine.js';
+import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 
 const router = Router();
 
@@ -78,7 +79,6 @@ router.post('/campaigns/:id/automate', async (req: any, res) => {
   try {
     const campaignId = parseInt(req.params.id);
     const { targetEmailCount, googleAccessToken, fastApiUrl } = req.body;
-    
     if (!googleAccessToken) {
       return res.status(400).json({ error: 'Google Access Token is required for automation' });
     }
@@ -279,20 +279,12 @@ router.post('/emails/:id/send', async (req: any, res) => {
 
     const [user] = await db.select().from(users).where(eq(users.id, email.userId));
 
-    // Construct MIME Multipart Email
-    const boundary = 'boundary12345';
-    const messageParts = [
-      `To: ${toEmail}`,
-      `Subject: ${email.subject}`,
-      'MIME-Version: 1.0',
-      `Content-Type: multipart/mixed; boundary="${boundary}"`,
-      '',
-      `--${boundary}`,
-      'Content-Type: text/plain; charset="UTF-8"',
-      '',
-      email.body,
-      ''
-    ];
+    const mailOptions: any = {
+      to: toEmail,
+      subject: email.subject,
+      text: email.body,
+      attachments: []
+    };
 
     if (email.tailoredResumeJson) {
       let pdfBuffer: Buffer;
@@ -300,38 +292,30 @@ router.post('/emails/:id/send', async (req: any, res) => {
         const resumeData = JSON.parse(email.tailoredResumeJson);
         const htmlContent = generateResumeHtml(resumeData);
         
-        const browser = await puppeteer.launch({ headless: true });
+        const browser = await puppeteer.launch({ 
+          headless: true,
+          args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+        });
         const page = await browser.newPage();
         await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
         const uint8Array = await page.pdf({ format: 'A4', printBackground: true });
         pdfBuffer = Buffer.from(uint8Array);
         await browser.close();
-      } catch (e) {
+      } catch (e: any) {
         console.error("Error generating tailored resume PDF with puppeteer:", e);
-        pdfBuffer = Buffer.from("Error generating tailored resume PDF.");
+        return res.status(500).json({ error: `Puppeteer failed to generate PDF: ${e.message}` });
       }
 
-      const base64Resume = pdfBuffer.toString('base64');
-      
-      messageParts.push(
-        `--${boundary}`,
-        `Content-Type: application/pdf; name="Tailored_Resume.pdf"`,
-        `Content-Disposition: attachment; filename="Tailored_Resume.pdf"`,
-        `Content-Transfer-Encoding: base64`,
-        '',
-        base64Resume,
-        ''
-      );
+      mailOptions.attachments.push({
+        filename: 'Tailored_Resume.pdf',
+        content: pdfBuffer,
+        contentType: 'application/pdf'
+      });
     }
-    
-    messageParts.push(`--${boundary}--`);
 
-    const rawMessage = messageParts.join('\r\n');
-    const encodedMessage = Buffer.from(rawMessage)
-      .toString('base64')
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+    const mail = new MailComposer(mailOptions);
+    const message = await mail.compile().build();
+    const encodedMessage = message.toString('base64url');
 
     // Call Gmail API
     const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {

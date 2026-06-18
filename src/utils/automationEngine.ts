@@ -12,6 +12,7 @@ import {
 } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 import puppeteer from 'puppeteer';
+import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import { generateResumeHtml } from './resumeTemplate.js';
 
 export async function runAutomationEngine(
@@ -183,41 +184,37 @@ export async function runAutomationEngine(
         let pdfBuffer: Buffer;
         try {
           const htmlContent = generateResumeHtml(tailored_resume);
-          const browser = await puppeteer.launch({ headless: true });
+          const browser = await puppeteer.launch({ 
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+          });
           const page = await browser.newPage();
           await page.setContent(htmlContent, { waitUntil: 'domcontentloaded' });
           const uint8Array = await page.pdf({ format: 'A4', printBackground: true });
           pdfBuffer = Buffer.from(uint8Array);
           await browser.close();
         } catch (e) {
-          pdfBuffer = Buffer.from("Error generating tailored resume PDF.");
+          console.error("Error generating tailored resume PDF with puppeteer:", e);
+          throw new Error("Puppeteer failed to generate PDF.");
         }
 
         // 9. Send via Gmail API
-        const boundary = 'boundary12345';
-        const messageParts = [
-          `To: ${contact.email}`,
-          `Subject: ${subject}`,
-          'MIME-Version: 1.0',
-          `Content-Type: multipart/mixed; boundary="${boundary}"`,
-          '',
-          `--${boundary}`,
-          'Content-Type: text/plain; charset="UTF-8"',
-          '',
-          body,
-          '',
-          `--${boundary}`,
-          `Content-Type: application/pdf; name="Tailored_Resume.pdf"`,
-          `Content-Disposition: attachment; filename="Tailored_Resume.pdf"`,
-          `Content-Transfer-Encoding: base64`,
-          '',
-          pdfBuffer.toString('base64'),
-          '',
-          `--${boundary}--`
-        ];
+        const mailOptions = {
+          to: contact.email,
+          subject: subject,
+          text: body,
+          attachments: [
+            {
+              filename: 'Tailored_Resume.pdf',
+              content: pdfBuffer,
+              contentType: 'application/pdf'
+            }
+          ]
+        };
 
-        const rawMessage = messageParts.join('\r\n');
-        const encodedMessage = Buffer.from(rawMessage).toString('base64').replaceAll('+', '-').replaceAll('/', '_').replace(/=+$/, '');
+        const mail = new MailComposer(mailOptions);
+        const message = await mail.compile().build();
+        const encodedMessage = message.toString('base64url');
 
         const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
           method: 'POST',
