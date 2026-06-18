@@ -8,7 +8,7 @@
   "main": "app.ts",
   "scripts": {
     "dev": "tsx watch app.ts",
-    "build": "tsc",
+    "build": "npx puppeteer browsers install chrome && tsc",
     "start": "node dist/app.js",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
