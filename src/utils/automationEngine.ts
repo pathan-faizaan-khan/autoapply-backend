@@ -110,18 +110,29 @@ export async function runAutomationEngine(
         console.log(`[Automation] Found contact ${contact.email}, tailoring resume...`);
 
         // 5. Tailor Resume
-        const tailorRes = await fetch(`${fastApiUrl}/api/resume/tailor`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            job_title: job.title,
-            job_description: job.description || "",
-            resume_data: resumeContext,
-            candidate_name: personalInfo?.name || "Candidate",
-          }),
-        });
-        
-        const { tailored_resume } = await tailorRes.json();
+        let tailored_resume;
+        try {
+          const tailorRes = await fetch(`${fastApiUrl}/api/resume/tailor`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              job_title: job.title,
+              job_description: job.description || "",
+              resume_data: resumeContext,
+              candidate_name: personalInfo?.name || "Candidate",
+            }),
+          });
+          
+          if (!tailorRes.ok) {
+            const errText = await tailorRes.text();
+            throw new Error(`Tailor API failed: ${tailorRes.status} ${errText}`);
+          }
+          const tailorData = await tailorRes.json();
+          tailored_resume = tailorData.tailored_resume || resumeContext;
+        } catch (tailorErr) {
+          console.error(`[Automation] Resume tailoring failed, using original resume:`, tailorErr);
+          tailored_resume = resumeContext;
+        }
 
         // 6. Generate Email Body
         const genRes = await fetch(`${fastApiUrl}/api/email/generate`, {
