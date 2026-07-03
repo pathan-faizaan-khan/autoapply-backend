@@ -136,9 +136,17 @@ router.post('/gmail', async (req: any, res) => {
 
         if (process.env.GROQ_API_KEY) {
           try {
-            const prompt = `Analyze this HR email reply. Determine if it is a positive possibility (scheduling an interview) or negative (rejection). 
+            const prompt = `You are an HR email analyzer. Analyze this HR email reply and determine if it is a positive possibility (scheduling an interview, next steps, selected) or negative (rejection, not selected).
+
 Email: "${fullBody}"
-Respond in strict JSON format: {"sentiment": "positive" | "negative", "dateTime": "ISO 8601 string if positive, else null", "platform": "Google Meet/Zoom/Teams/Other if positive", "link": "meeting link if present"}`;
+
+You MUST respond in strict JSON format exactly like this example:
+{
+  "sentiment": "positive" or "negative",
+  "dateTime": "ISO 8601 string if an interview date is proposed, else null",
+  "platform": "Google Meet, Zoom, Teams, or Other if positive, else null",
+  "link": "meeting link if present, else null"
+}`;
 
             const aiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
               method: 'POST',
@@ -147,12 +155,18 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative", "dateTime"
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify({
-                model: 'llama3-70b-8192',
+                model: 'llama-3.3-70b-versatile',
                 response_format: { type: 'json_object' },
                 messages: [{ role: 'user', content: prompt }]
               })
             });
+
             const aiData = await aiResponse.json();
+            if (!aiResponse.ok) {
+              console.error("[Webhook] Groq API Error:", aiData);
+              throw new Error(`Groq API returned ${aiResponse.status}`);
+            }
+
             const resultText = aiData.choices?.[0]?.message?.content || '{}';
             console.log(`[Webhook] Raw AI Output: ${resultText}`);
             
