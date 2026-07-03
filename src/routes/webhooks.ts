@@ -129,7 +129,7 @@ router.post('/gmail', async (req: any, res) => {
         const fullBody = extractPlainText(msgData.payload) || bodySnippet;
         
         console.log(`[Webhook] Email Body sent to AI: "${fullBody.substring(0, 100)}..."`);
-        let sentiment = 'neutral';
+        let sentiment = 'negative';
         let date_time = new Date().toISOString();
         let platform = 'Other';
         let link = '';
@@ -138,7 +138,7 @@ router.post('/gmail', async (req: any, res) => {
           try {
             const prompt = `Analyze this HR email reply. Determine if it is a positive possibility (scheduling an interview) or negative (rejection). 
 Email: "${fullBody}"
-Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral", "dateTime": "ISO 8601 string if positive, else null", "platform": "Google Meet/Zoom/Teams/Other if positive", "link": "meeting link if present"}`;
+Respond in strict JSON format: {"sentiment": "positive" | "negative", "dateTime": "ISO 8601 string if positive, else null", "platform": "Google Meet/Zoom/Teams/Other if positive", "link": "meeting link if present"}`;
 
             const aiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
               method: 'POST',
@@ -154,12 +154,17 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
             });
             const aiData = await aiResponse.json();
             const resultText = aiData.choices?.[0]?.message?.content || '{}';
-            const result = JSON.parse(resultText);
+            console.log(`[Webhook] Raw AI Output: ${resultText}`);
+            
+            const cleanText = resultText.replace(/```json/gi, '').replace(/```/g, '').trim();
+            const result = JSON.parse(cleanText);
 
-            sentiment = result.sentiment;
-            if (result.dateTime) date_time = result.dateTime;
-            if (result.platform) platform = result.platform;
-            if (result.link) link = result.link;
+            sentiment = (result.sentiment || result.Sentiment || 'negative').toLowerCase();
+            if (sentiment !== 'positive') sentiment = 'negative'; // Strict binary
+
+            if (result.dateTime || result.DateTime) date_time = result.dateTime || result.DateTime;
+            if (result.platform || result.Platform) platform = result.platform || result.Platform;
+            if (result.link || result.Link) link = result.link || result.Link;
 
             console.log(`[Webhook] Groq AI determined sentiment: ${sentiment}`);
           } catch (e) { console.error("Groq AI parse error", e); }
@@ -169,7 +174,7 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
           if (lowerBody.includes('interview') || lowerBody.includes('next steps') || lowerBody.includes('schedule')) {
             sentiment = 'positive';
             date_time = new Date(Date.now() + 86400000).toISOString(); // tomorrow
-          } else if (lowerBody.includes('unfortunately') || lowerBody.includes('regret') || lowerBody.includes('not selected')) {
+          } else {
             sentiment = 'negative';
           }
         }
