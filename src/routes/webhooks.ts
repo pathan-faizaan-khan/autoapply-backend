@@ -134,7 +134,7 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
             const resultText = aiData.choices?.[0]?.message?.content || '{}';
             const result = JSON.parse(resultText);
 
-            sentiment = result.sentiment || 'neutral';
+            sentiment = result.sentiment;
             if (result.dateTime) date_time = result.dateTime;
             if (result.platform) platform = result.platform;
             if (result.link) link = result.link;
