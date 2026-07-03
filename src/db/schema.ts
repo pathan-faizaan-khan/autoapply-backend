@@ -206,3 +206,20 @@ export const interviews = pgTable('interviews', {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
+// --- SELECTIONS (Offer Letters / Final Selection Emails) ---
+
+export const selections = pgTable('selections', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  targetId: integer('target_id').references(() => outreachTargets.id, { onDelete: 'cascade' }),
+  coldEmailId: integer('cold_email_id').references(() => coldEmails.id, { onDelete: 'set null' }),
+  company: varchar('company', { length: 255 }).notNull(),
+  role: varchar('role', { length: 255 }),
+  offerBody: text('offer_body'),           // full text of the offer/selection email
+  recruiterName: varchar('recruiter_name', { length: 255 }),
+  recruiterEmail: varchar('recruiter_email', { length: 255 }),
+  receivedAt: timestamp('received_at').defaultNow().notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+

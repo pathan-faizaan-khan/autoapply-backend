@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db/index.js';
-import { users, coldEmails, outreachTargets, interviews } from '../db/schema.js';
+import { users, coldEmails, outreachTargets, interviews, selections } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 
 // Helper to extract full plain text from Gmail payload
@@ -129,23 +129,28 @@ router.post('/gmail', async (req: any, res) => {
         const fullBody = extractPlainText(msgData.payload) || bodySnippet;
         
         console.log(`[Webhook] Email Body sent to AI: "${fullBody.substring(0, 100)}..."`);
-        let sentiment = 'negative';
+        let emailType: 'interview_invite' | 'job_offer' | 'rejection' = 'rejection';
         let date_time = new Date().toISOString();
         let platform = 'Other';
         let link = '';
 
         if (process.env.GROQ_API_KEY) {
           try {
-            const prompt = `You are an HR email analyzer. Analyze this HR email reply and determine if it is a positive possibility (scheduling an interview, next steps, selected) or negative (rejection, not selected).
+            const prompt = `You are an expert HR email classifier. Carefully read this email reply and classify it into EXACTLY ONE of three categories:
 
-Email: "${fullBody}"
+1. "interview_invite" — The recruiter is scheduling a job interview, asking for availability, or inviting to a screening/technical round.
+2. "job_offer" — This is a formal job offer or final selection email. Keywords: "offer letter", "pleased to offer", "joining date", "compensation package", "CTC", "welcome to the team", "we'd like to extend an offer", "you have been selected for the position".
+3. "rejection" — The candidate was not selected or the role is no longer available.
 
-You MUST respond in strict JSON format exactly like this example:
+Email:
+"""${fullBody}"""
+
+You MUST respond in strict JSON format:
 {
-  "sentiment": "positive" or "negative",
-  "dateTime": "ISO 8601 string if an interview date is proposed, else null",
-  "platform": "Google Meet, Zoom, Teams, or Other if positive, else null",
-  "link": "meeting link if present, else null"
+  "type": "interview_invite" or "job_offer" or "rejection",
+  "dateTime": "ISO 8601 string if interview is being scheduled, else null",
+  "platform": "Google Meet, Zoom, Teams, Phone, or Other if interview_invite, else null",
+  "link": "meeting/interview link if present, else null"
 }`;
 
             const aiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -173,39 +178,49 @@ You MUST respond in strict JSON format exactly like this example:
             const cleanText = resultText.replace(/```json/gi, '').replace(/```/g, '').trim();
             const result = JSON.parse(cleanText);
 
-            sentiment = (result.sentiment || result.Sentiment || 'negative').toLowerCase();
-            if (sentiment !== 'positive') sentiment = 'negative'; // Strict binary
+            const rawType = (result.type || result.Type || '').toLowerCase();
+            if (rawType === 'interview_invite') emailType = 'interview_invite';
+            else if (rawType === 'job_offer') emailType = 'job_offer';
+            else emailType = 'rejection';
 
             if (result.dateTime || result.DateTime) date_time = result.dateTime || result.DateTime;
             if (result.platform || result.Platform) platform = result.platform || result.Platform;
             if (result.link || result.Link) link = result.link || result.Link;
 
-            console.log(`[Webhook] Groq AI determined sentiment: ${sentiment}`);
+            console.log(`[Webhook] Groq AI classified email as: ${emailType}`);
           } catch (e) { console.error("Groq AI parse error", e); }
         } else {
-          // Fallback keyword mock logic
+          // Fallback keyword logic
           const lowerBody = fullBody.toLowerCase();
-          if (lowerBody.includes('interview') || lowerBody.includes('next steps') || lowerBody.includes('schedule')) {
-            sentiment = 'positive';
-            date_time = new Date(Date.now() + 86400000).toISOString(); // tomorrow
+          if (lowerBody.includes('offer letter') || lowerBody.includes('pleased to offer') || lowerBody.includes('joining date') || lowerBody.includes('welcome to the team') || lowerBody.includes('compensation')) {
+            emailType = 'job_offer';
+          } else if (lowerBody.includes('interview') || lowerBody.includes('schedule') || lowerBody.includes('availability') || lowerBody.includes('next steps')) {
+            emailType = 'interview_invite';
           } else {
-            sentiment = 'negative';
+            emailType = 'rejection';
           }
         }
 
         if (matchedEmail.targetId) {
+          // Determine new status and sentiment based on email type
+          let newStatus: string;
+          if (emailType === 'interview_invite') newStatus = 'replied_positive';
+          else if (emailType === 'job_offer') newStatus = 'selected';
+          else newStatus = 'replied_negative';
+
           await db.update(outreachTargets)
             .set({
-              status: sentiment === 'positive' ? 'replied_positive' : (sentiment === 'negative' ? 'replied_negative' : 'replied'),
-              responseSentiment: sentiment,
+              status: newStatus,
+              responseSentiment: emailType === 'rejection' ? 'negative' : 'positive',
               replyBody: fullBody,
               updatedAt: new Date()
             })
             .where(eq(outreachTargets.id, matchedEmail.targetId));
-          console.log(`[Webhook] Successfully updated target ${matchedEmail.targetId} in the database (Sentiment: ${sentiment}).`);
+          console.log(`[Webhook] Updated target ${matchedEmail.targetId} → status: ${newStatus}`);
 
-          if (sentiment === 'positive') {
-            console.log(`[Webhook] Positive reply detected! Scheduling interview for target ${matchedEmail.targetId}...`);
+          if (emailType === 'interview_invite') {
+            // Schedule interview round
+            console.log(`[Webhook] Interview invite detected! Creating interview entry for target ${matchedEmail.targetId}...`);
             await db.insert(interviews).values({
               userId: user.id,
               targetId: matchedEmail.targetId,
@@ -216,6 +231,25 @@ You MUST respond in strict JSON format exactly like this example:
               link,
               status: 'scheduled'
             });
+            console.log(`[Webhook] Interview entry created for ${matchedEmail.company}`);
+
+          } else if (emailType === 'job_offer') {
+            // Save offer letter to selections table
+            console.log(`[Webhook] Job offer detected! Saving to selections table for target ${matchedEmail.targetId}...`);
+            await db.insert(selections).values({
+              userId: user.id,
+              targetId: matchedEmail.targetId,
+              coldEmailId: matchedEmail.emailId,
+              company: matchedEmail.company || 'Unknown',
+              role: matchedEmail.role || null,
+              offerBody: fullBody,
+              recruiterName: fromHeader.replace(/<.*>/, '').trim() || null,
+              recruiterEmail: fromHeader.match(/<(.+)>/)?.[1] || fromHeader.trim() || null,
+              receivedAt: new Date(),
+            });
+            console.log(`[Webhook] Selection/offer saved for ${matchedEmail.company}`);
+          } else {
+            console.log(`[Webhook] Rejection detected for target ${matchedEmail.targetId}`);
           }
         }
       }

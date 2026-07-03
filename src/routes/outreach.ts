@@ -12,6 +12,7 @@ import {
   resumeEducations,
   users,
   interviews,
+  selections,
 } from '../db/schema.js';
 import { eq, desc, and } from 'drizzle-orm';
 import puppeteer from 'puppeteer';
@@ -227,26 +228,24 @@ router.get('/history', async (req: any, res) => {
   }
 });
 
-// GET /api/outreach/selected — returns all targets with replied_positive status (offer letters / selections)
+// GET /api/outreach/selected — returns all job offers from the selections table
 router.get('/selected', async (req: any, res) => {
   try {
     const userId = getUserId(req);
 
     const selected = await db.select({
+      selection: selections,
       target: outreachTargets,
-      email: coldEmails,
-      campaign: outreachCampaigns,
     })
-    .from(outreachTargets)
-    .leftJoin(coldEmails, eq(coldEmails.targetId, outreachTargets.id))
-    .leftJoin(outreachCampaigns, eq(outreachTargets.campaignId, outreachCampaigns.id))
-    .where(and(eq(coldEmails.userId, userId), eq(outreachTargets.status, 'replied_positive')))
-    .orderBy(desc(outreachTargets.updatedAt));
+    .from(selections)
+    .leftJoin(outreachTargets, eq(selections.targetId, outreachTargets.id))
+    .where(eq(selections.userId, userId))
+    .orderBy(desc(selections.receivedAt));
 
     res.json({ selected });
   } catch (err) {
     console.error("Selected fetch error:", err);
-    res.status(500).json({ error: 'Failed to fetch selected companies' });
+    res.status(500).json({ error: 'Failed to fetch selections' });
   }
 });
 
