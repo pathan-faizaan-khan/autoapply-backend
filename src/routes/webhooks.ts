@@ -52,6 +52,7 @@ router.post('/gmail', async (req: any, res) => {
     const historyData = await historyRes.json();
 
     if (!historyData.history) {
+      console.log(`[Webhook] No new history found for ${emailAddress} since ${startHistoryId}. Silently exiting.`);
       // Update the user's history ID and exit
       await db.update(users).set({ gmailHistoryId: historyId.toString() }).where(eq(users.id, user.id));
       return res.status(200).send('OK');
@@ -71,11 +72,16 @@ router.post('/gmail', async (req: any, res) => {
     .where(and(eq(coldEmails.userId, user.id), eq(coldEmails.status, 'sent')));
 
     // 5. Process newly added messages
+    console.log(`[Webhook] Found ${historyData.history.length} history records to process.`);
     for (const record of historyData.history) {
-      if (!record.messagesAdded) continue;
+      if (!record.messagesAdded) {
+        console.log(`[Webhook] Record does not contain messagesAdded. Skipping.`);
+        continue;
+      }
 
       for (const added of record.messagesAdded) {
         const msgId = added.message.id;
+        console.log(`[Webhook] Fetching full message for ID: ${msgId}`);
         
         // Fetch full message
         const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}`, {
@@ -93,7 +99,10 @@ router.post('/gmail', async (req: any, res) => {
           (se.subject && subjectHeader.replace(/^(Re|Fwd):\s*/i, '').trim() === se.subject?.trim())
         );
 
-        if (!matchedEmail) continue;
+        if (!matchedEmail) {
+          console.log(`[Webhook] Message ${msgId} (From: ${fromHeader}, Subject: ${subjectHeader}) did not match any sent cold emails. Skipping.`);
+          continue;
+        }
         console.log(`[Webhook] Matched reply from ${fromHeader} for target ${matchedEmail.targetId}`);
 
         const bodySnippet = msgData.snippet || '';
