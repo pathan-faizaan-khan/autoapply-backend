@@ -13,7 +13,8 @@ router.get('/', async (req: AuthRequest, res) => {
     // Get user base info
     const [user] = await db.select({
       name: users.name,
-      email: users.email
+      email: users.email,
+      googleRefreshToken: users.googleRefreshToken
     }).from(users).where(eq(users.id, userId));
 
     if (!user) {
@@ -69,6 +70,7 @@ router.get('/', async (req: AuthRequest, res) => {
     res.json({
       name: user.name,
       email: user.email,
+      hasGmailConnected: !!user.googleRefreshToken,
       profile: profile || null
     });
   } catch (error) {

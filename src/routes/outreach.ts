@@ -555,6 +555,10 @@ router.post('/connect-gmail', async (req: any, res) => {
       const watchData = await watchRes.json();
       if (watchRes.ok) {
         await db.update(users).set({ gmailHistoryId: watchData.historyId.toString() }).where(eq(users.id, userId));
+        console.log(`[Gmail Watch] Successfully enabled for user ${userId}`);
+      } else {
+        console.error(`[Gmail Watch Error] Failed to enable push notifications:`, watchData);
+        return res.status(500).json({ error: 'Connected to Gmail, but failed to enable push notifications. Check server logs.' });
       }
     }
 
