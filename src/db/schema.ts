@@ -7,6 +7,8 @@ export const users = pgTable('users', {
   name: varchar('name', { length: 255 }),
   googleId: varchar('google_id', { length: 255 }).unique(),
   isVerified: boolean('is_verified').default(false).notNull(),
+  googleRefreshToken: varchar('google_refresh_token', { length: 500 }),
+  gmailHistoryId: varchar('gmail_history_id', { length: 100 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -153,7 +155,8 @@ export const outreachTargets = pgTable('outreach_targets', {
   contactLinkedin: varchar('contact_linkedin', { length: 500 }),
   contactGithub: varchar('contact_github', { length: 500 }),
   contactConfidence: varchar('contact_confidence', { length: 20 }), // high|medium|low
-  status: varchar('status', { length: 50 }).default('discovered').notNull(), // discovered|emailed|replied|ignored
+  status: varchar('status', { length: 50 }).default('discovered').notNull(), // discovered|emailed|replied|ignored|replied_positive|replied_negative
+  responseSentiment: varchar('response_sentiment', { length: 50 }), // positive|negative|neutral
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
@@ -181,6 +184,23 @@ export const scrapedJobs = pgTable('scraped_jobs', {
   launchDate: timestamp('launch_date'),
   endDate: timestamp('end_date'),
   appliedPeoples: integer('applied_peoples'),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+// --- INTERVIEWS ---
+
+export const interviews = pgTable('interviews', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
+  targetId: integer('target_id').references(() => outreachTargets.id, { onDelete: 'cascade' }),
+  company: varchar('company', { length: 255 }).notNull(),
+  role: varchar('role', { length: 255 }).notNull(),
+  dateTime: timestamp('date_time').notNull(),
+  platform: varchar('platform', { length: 100 }),
+  link: varchar('link', { length: 1000 }),
+  notes: text('notes'),
+  status: varchar('status', { length: 50 }).default('scheduled').notNull(),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

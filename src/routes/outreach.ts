@@ -11,12 +11,14 @@ import {
   resumeProjects,
   resumeEducations,
   users,
+  interviews,
 } from '../db/schema.js';
 import { eq, desc, and } from 'drizzle-orm';
 import puppeteer from 'puppeteer';
 import { generateResumeHtml } from '../utils/resumeTemplate.js';
 import { runAutomationEngine } from '../utils/automationEngine.js';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
+import { GoogleGenAI } from '@google/genai';
 
 const router = Router();
 
@@ -381,6 +383,165 @@ router.get('/resume-context', async (req: any, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch resume context' });
+  }
+});
+
+// POST /api/outreach/sync-replies — fetch recent Gmails and classify replies
+router.post('/sync-replies', async (req: any, res) => {
+  try {
+    const userId = getUserId(req);
+    const { googleAccessToken } = req.body;
+    if (!googleAccessToken) return res.status(400).json({ error: 'googleAccessToken is required' });
+
+    // Fetch sent cold emails for this user to match replies against
+    const sentEmails = await db.select({
+      emailId: coldEmails.id,
+      targetId: coldEmails.targetId,
+      subject: coldEmails.subject,
+      contactEmail: outreachTargets.contactEmail,
+      company: outreachTargets.companyName,
+      role: outreachTargets.jobTitle
+    })
+    .from(coldEmails)
+    .leftJoin(outreachTargets, eq(coldEmails.targetId, outreachTargets.id))
+    .where(and(eq(coldEmails.userId, userId), eq(coldEmails.status, 'sent')));
+
+    if (sentEmails.length === 0) {
+      return res.json({ success: true, processed: 0, message: "No sent emails to match" });
+    }
+
+    // Fetch recent received emails from gmail
+    const gmailRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages?q=in:inbox newer_than:7d', {
+      headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+    });
+    const { messages } = await gmailRes.json();
+    if (!messages || messages.length === 0) return res.json({ success: true, processed: 0 });
+
+    let processedCount = 0;
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+
+    for (const msg of messages.slice(0, 10)) { // limit to 10 for demo/performance
+      const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}`, {
+        headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+      });
+      const msgData = await msgRes.json();
+      
+      const headers = msgData.payload?.headers || [];
+      const subjectHeader = headers.find((h: any) => h.name.toLowerCase() === 'subject')?.value || '';
+      const fromHeader = headers.find((h: any) => h.name.toLowerCase() === 'from')?.value || '';
+      
+      // Strict matching: only process if it matches the contact email or the exact thread subject sent by platform
+      const matchedEmail = sentEmails.find(se => 
+        (se.contactEmail && fromHeader.includes(se.contactEmail)) || 
+        (se.subject && subjectHeader.replace(/^(Re|Fwd):\s*/i, '').trim() === se.subject?.trim())
+      );
+
+      if (!matchedEmail) continue;
+
+      const bodySnippet = msgData.snippet || '';
+      let sentiment = 'neutral';
+      let date_time = new Date().toISOString();
+      let platform = 'Other';
+      let link = '';
+      
+      if (process.env.GEMINI_API_KEY) {
+        try {
+          const prompt = `Analyze this HR email reply. Determine if it is a positive possibility (scheduling an interview) or negative (rejection). 
+Email: "${bodySnippet}"
+Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral", "dateTime": "ISO 8601 string if positive, else null", "platform": "Google Meet/Zoom/Teams/Other if positive", "link": "meeting link if present"}`;
+          const aiResponse = await ai.models.generateContent({
+             model: 'gemini-2.5-flash',
+             contents: prompt,
+             config: { responseMimeType: 'application/json' }
+          });
+          const result = JSON.parse(aiResponse.text || '{}');
+          sentiment = result.sentiment || 'neutral';
+          if (result.dateTime) date_time = result.dateTime;
+          if (result.platform) platform = result.platform;
+          if (result.link) link = result.link;
+        } catch(e) { console.error("GenAI parse error", e); }
+      } else {
+        // Fallback keyword mock logic if no API key
+        const lowerBody = bodySnippet.toLowerCase();
+        if (lowerBody.includes('interview') || lowerBody.includes('next steps') || lowerBody.includes('schedule')) {
+           sentiment = 'positive';
+           date_time = new Date(Date.now() + 86400000).toISOString(); // tomorrow
+        } else if (lowerBody.includes('unfortunately') || lowerBody.includes('regret') || lowerBody.includes('not selected')) {
+           sentiment = 'negative';
+        }
+      }
+
+      if (matchedEmail.targetId) {
+        await db.update(outreachTargets)
+          .set({ 
+             status: sentiment === 'positive' ? 'replied_positive' : (sentiment === 'negative' ? 'replied_negative' : 'replied'),
+             responseSentiment: sentiment 
+          })
+          .where(eq(outreachTargets.id, matchedEmail.targetId));
+        
+        if (sentiment === 'positive') {
+           // Insert interview entry
+           await db.insert(interviews).values({
+              userId,
+              targetId: matchedEmail.targetId,
+              company: matchedEmail.company || 'Unknown',
+              role: matchedEmail.role || 'Unknown',
+              dateTime: new Date(date_time),
+              platform,
+              link,
+              status: 'scheduled'
+           });
+        }
+      }
+      processedCount++;
+    }
+
+    res.json({ success: true, processed: processedCount });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to sync replies' });
+  }
+});
+
+// POST /api/outreach/watch-inbox — Subscribes the user's Gmail to our Pub/Sub topic
+router.post('/watch-inbox', async (req: any, res) => {
+  try {
+    const userId = getUserId(req);
+    const { googleAccessToken, googleRefreshToken } = req.body;
+    if (!googleAccessToken) return res.status(400).json({ error: 'googleAccessToken is required' });
+
+    // Store the refresh token securely in our DB
+    if (googleRefreshToken) {
+      await db.update(users).set({ googleRefreshToken }).where(eq(users.id, userId));
+    }
+
+    // Call the Gmail watch API
+    const watchRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/watch', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${googleAccessToken}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        topicName: process.env.PUBSUB_TOPIC_NAME || 'projects/your-gcp-project/topics/gmail-webhooks',
+        labelIds: ['INBOX'],
+        labelFilterAction: 'include'
+      })
+    });
+    
+    const watchData = await watchRes.json();
+    if (!watchRes.ok) {
+      console.error("Watch error:", watchData);
+      return res.status(500).json({ error: 'Failed to enable Gmail push notifications' });
+    }
+
+    // Save the initial history ID so our webhook knows where to start looking
+    await db.update(users).set({ gmailHistoryId: watchData.historyId.toString() }).where(eq(users.id, userId));
+
+    res.json({ success: true, historyId: watchData.historyId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to watch inbox' });
   }
 });
 

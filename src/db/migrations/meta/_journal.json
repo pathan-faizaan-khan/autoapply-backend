@@ -15,6 +15,13 @@
       "when": 1780841362234,
       "tag": "0001_tearful_rocket_racer",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1783095961798,
+      "tag": "0002_clammy_rogue",
+      "breakpoints": true
     }
   ]
 }

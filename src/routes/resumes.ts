@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { authenticateToken } from '../middleware/auth.js';
 import { db } from '../db/index.js';
-import { 
-  resumes, 
-  resumePersonalInfo, 
-  resumeExperiences, 
-  resumeEducations, 
+import {
+  resumes,
+  resumePersonalInfo,
+  resumeExperiences,
+  resumeEducations,
   resumeSkills,
   resumeProjects,
   resumeCertifications,
@@ -21,17 +21,14 @@ const getUserId = (req: any) => {
   return req.user!.userId;
 };
 
-// ── GET: Fetch all resumes (with profile data) for the current user ──
 router.get('/', async (req: any, res) => {
   try {
     const userId = getUserId(req);
 
-    // Fetch all resumes ordered by newest first
     const allResumes = await db.select().from(resumes)
       .where(eq(resumes.userId, userId))
       .orderBy(desc(resumes.createdAt));
 
-    // For each resume, fetch the nested profile details
     const populated = await Promise.all(allResumes.map(async (resume) => {
       const [personalInfo] = await db.select().from(resumePersonalInfo).where(eq(resumePersonalInfo.resumeId, resume.id));
       const experiences = await db.select().from(resumeExperiences).where(eq(resumeExperiences.resumeId, resume.id));
@@ -64,10 +61,10 @@ router.get('/', async (req: any, res) => {
 router.post('/', async (req: any, res) => {
   try {
     const userId = getUserId(req);
-    const { 
-      s3Url, 
-      fileName, 
-      atsScore, 
+    const {
+      s3Url,
+      fileName,
+      atsScore,
       parsedData, // Expected: { name, email, phone, experience[], education[], skills[] }
       rawText
     } = req.body;
@@ -167,7 +164,7 @@ router.post('/', async (req: any, res) => {
     const [existingProfile] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
     const pi = parsedData?.personalInfo || {};
     const skillsArr = Array.isArray(parsedData?.skills) ? parsedData.skills : [];
-    
+
     if (!existingProfile) {
       await db.insert(userProfiles).values({
         userId,
@@ -187,7 +184,7 @@ router.post('/', async (req: any, res) => {
       if (!existingProfile.phone && pi.phone) updates.phone = pi.phone;
       if (!existingProfile.skills && skillsArr.length > 0) updates.skills = skillsArr.join(', ');
       if (!existingProfile.resumeText && (rawText || pi.summary)) updates.resumeText = rawText || pi.summary;
-      
+
       if (Object.keys(updates).length > 0) {
         await db.update(userProfiles).set(updates).where(eq(userProfiles.userId, userId));
       }
@@ -227,7 +224,7 @@ router.put('/:id/personal-info', async (req: any, res) => {
   try {
     const resumeId = parseInt(req.params.id);
     const { name, email, phone } = req.body;
-    
+
     // Check ownership
     const [target] = await db.select().from(resumes).where(eq(resumes.id, resumeId));
     if (!target || target.userId !== getUserId(req)) return res.status(403).json({ error: 'Forbidden' });
@@ -239,7 +236,7 @@ router.put('/:id/personal-info', async (req: any, res) => {
     } else {
       await db.insert(resumePersonalInfo).values({ resumeId, name, email, phone });
     }
-    
+
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: 'Update failed' });
