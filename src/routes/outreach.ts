@@ -19,6 +19,7 @@ import { generateResumeHtml } from '../utils/resumeTemplate.js';
 import { runAutomationEngine } from '../utils/automationEngine.js';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import { GoogleGenAI } from '@google/genai';
+import { OAuth2Client } from 'google-auth-library';
 
 const router = Router();
 
@@ -270,16 +271,29 @@ router.patch('/emails/:id', async (req: any, res) => {
 router.post('/emails/:id/send', async (req: any, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { googleAccessToken, toEmail } = req.body;
+    const { toEmail } = req.body;
     
-    if (!googleAccessToken || !toEmail) {
-      return res.status(400).json({ error: 'Missing googleAccessToken or toEmail' });
+    if (!toEmail) {
+      return res.status(400).json({ error: 'Missing toEmail' });
     }
 
     const [email] = await db.select().from(coldEmails).where(eq(coldEmails.id, id));
     if (!email) return res.status(404).json({ error: 'Email not found' });
 
     const [user] = await db.select().from(users).where(eq(users.id, email.userId));
+    if (!user || !user.googleRefreshToken) {
+      return res.status(401).json({ error: 'User has not connected Gmail' });
+    }
+
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+    const { token } = await oauth2Client.getAccessToken();
+    const googleAccessToken = token;
+
+    if (!googleAccessToken) return res.status(500).json({ error: 'Failed to generate access token' });
 
     const mailOptions: any = {
       to: toEmail,
@@ -503,45 +517,51 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
   }
 });
 
-// POST /api/outreach/watch-inbox — Subscribes the user's Gmail to our Pub/Sub topic
-router.post('/watch-inbox', async (req: any, res) => {
+// POST /api/outreach/connect-gmail — Exchanges auth code for refresh token and starts watch
+router.post('/connect-gmail', async (req: any, res) => {
   try {
     const userId = getUserId(req);
-    const { googleAccessToken, googleRefreshToken } = req.body;
-    if (!googleAccessToken) return res.status(400).json({ error: 'googleAccessToken is required' });
+    const { code } = req.body;
+    if (!code) return res.status(400).json({ error: 'Auth code is required' });
 
-    // Store the refresh token securely in our DB
-    if (googleRefreshToken) {
-      await db.update(users).set({ googleRefreshToken }).where(eq(users.id, userId));
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET,
+      'postmessage' // required for client-side auth code flow
+    );
+
+    const { tokens } = await oauth2Client.getToken(code);
+    const { refresh_token, access_token } = tokens;
+
+    if (refresh_token) {
+      await db.update(users).set({ googleRefreshToken: refresh_token }).where(eq(users.id, userId));
     }
 
-    // Call the Gmail watch API
-    const watchRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/watch', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${googleAccessToken}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        topicName: process.env.PUBSUB_TOPIC_NAME || 'projects/your-gcp-project/topics/gmail-webhooks',
-        labelIds: ['INBOX'],
-        labelFilterAction: 'include'
-      })
-    });
-    
-    const watchData = await watchRes.json();
-    if (!watchRes.ok) {
-      console.error("Watch error:", watchData);
-      return res.status(500).json({ error: 'Failed to enable Gmail push notifications' });
+    // Call the Gmail watch API using the fresh access token
+    if (access_token) {
+      const watchRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/watch', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${access_token}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          topicName: process.env.PUBSUB_TOPIC_NAME || 'projects/your-gcp-project/topics/gmail-webhooks',
+          labelIds: ['INBOX'],
+          labelFilterAction: 'include'
+        })
+      });
+      
+      const watchData = await watchRes.json();
+      if (watchRes.ok) {
+        await db.update(users).set({ gmailHistoryId: watchData.historyId.toString() }).where(eq(users.id, userId));
+      }
     }
 
-    // Save the initial history ID so our webhook knows where to start looking
-    await db.update(users).set({ gmailHistoryId: watchData.historyId.toString() }).where(eq(users.id, userId));
-
-    res.json({ success: true, historyId: watchData.historyId });
+    res.json({ success: true, connected: true });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to watch inbox' });
+    console.error("Connect Gmail Error:", err);
+    res.status(500).json({ error: 'Failed to connect Gmail' });
   }
 });
 
