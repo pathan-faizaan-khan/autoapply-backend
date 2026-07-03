@@ -227,6 +227,30 @@ router.get('/history', async (req: any, res) => {
   }
 });
 
+// GET /api/outreach/selected — returns all targets with replied_positive status (offer letters / selections)
+router.get('/selected', async (req: any, res) => {
+  try {
+    const userId = getUserId(req);
+
+    const selected = await db.select({
+      target: outreachTargets,
+      email: coldEmails,
+      campaign: outreachCampaigns,
+    })
+    .from(outreachTargets)
+    .leftJoin(coldEmails, eq(coldEmails.targetId, outreachTargets.id))
+    .leftJoin(outreachCampaigns, eq(outreachTargets.campaignId, outreachCampaigns.id))
+    .where(and(eq(coldEmails.userId, userId), eq(outreachTargets.status, 'replied_positive')))
+    .orderBy(desc(outreachTargets.updatedAt));
+
+    res.json({ selected });
+  } catch (err) {
+    console.error("Selected fetch error:", err);
+    res.status(500).json({ error: 'Failed to fetch selected companies' });
+  }
+});
+
+
 // POST /api/outreach/emails — save a generated draft
 router.post('/emails', async (req: any, res) => {
   try {
