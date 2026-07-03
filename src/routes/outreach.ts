@@ -569,4 +569,48 @@ router.post('/connect-gmail', async (req: any, res) => {
   }
 });
 
+// GET /api/outreach/debug-watch — Forcefully trigger watch and return Google's raw response
+router.get('/debug-watch', async (req: any, res) => {
+  try {
+    const userId = getUserId(req);
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    
+    if (!user || !user.googleRefreshToken) {
+      return res.status(400).json({ error: 'User does not have a connected Gmail account (no refresh token found).' });
+    }
+
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+    const { token: access_token } = await oauth2Client.getAccessToken();
+
+    const topicName = process.env.PUBSUB_TOPIC_NAME || 'projects/your-gcp-project/topics/gmail-webhooks';
+    
+    const watchRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/watch', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${access_token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        topicName,
+        labelIds: ['INBOX'],
+        labelFilterAction: 'include'
+      })
+    });
+    
+    const watchData = await watchRes.json();
+    
+    return res.json({
+      status: watchRes.status,
+      topicAttempted: topicName,
+      googleResponse: watchData
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: 'Internal diagnostic error', details: err.message });
+  }
+});
+
 export default router;
