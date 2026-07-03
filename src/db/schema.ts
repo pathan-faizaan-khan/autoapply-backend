@@ -157,6 +157,7 @@ export const outreachTargets = pgTable('outreach_targets', {
   contactConfidence: varchar('contact_confidence', { length: 20 }), // high|medium|low
   status: varchar('status', { length: 50 }).default('discovered').notNull(), // discovered|emailed|replied|ignored|replied_positive|replied_negative
   responseSentiment: varchar('response_sentiment', { length: 50 }), // positive|negative|neutral
+  replyBody: text('reply_body'), // stores the full text of the recruiter's reply
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });

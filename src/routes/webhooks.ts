@@ -3,6 +3,26 @@ import { db } from '../db/index.js';
 import { users, coldEmails, outreachTargets, interviews } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
 
+// Helper to extract full plain text from Gmail payload
+function extractPlainText(payload: any): string {
+  if (!payload) return "";
+  let body = "";
+  if (payload.mimeType === "text/plain" && payload.body?.data) {
+    return Buffer.from(payload.body.data, 'base64url').toString('utf-8');
+  }
+  if (payload.parts) {
+    for (const part of payload.parts) {
+      if (part.mimeType === "text/plain" && part.body?.data) {
+        return Buffer.from(part.body.data, 'base64url').toString('utf-8');
+      } else if (part.parts) {
+        const nested = extractPlainText(part);
+        if (nested) return nested;
+      }
+    }
+  }
+  return body;
+}
+
 const router = Router();
 
 // POST /api/webhooks/gmail — Google Cloud Pub/Sub Push Endpoint
@@ -106,7 +126,9 @@ router.post('/gmail', async (req: any, res) => {
         console.log(`[Webhook] Matched reply from ${fromHeader} for target ${matchedEmail.targetId}`);
 
         const bodySnippet = msgData.snippet || '';
-        console.log(`[Webhook] Email Snippet sent to AI: "${bodySnippet}"`);
+        const fullBody = extractPlainText(msgData.payload) || bodySnippet;
+        
+        console.log(`[Webhook] Email Body sent to AI: "${fullBody.substring(0, 100)}..."`);
         let sentiment = 'neutral';
         let date_time = new Date().toISOString();
         let platform = 'Other';
@@ -115,7 +137,7 @@ router.post('/gmail', async (req: any, res) => {
         if (process.env.GROQ_API_KEY) {
           try {
             const prompt = `Analyze this HR email reply. Determine if it is a positive possibility (scheduling an interview) or negative (rejection). 
-Email: "${bodySnippet}"
+Email: "${fullBody}"
 Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral", "dateTime": "ISO 8601 string if positive, else null", "platform": "Google Meet/Zoom/Teams/Other if positive", "link": "meeting link if present"}`;
 
             const aiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
@@ -143,7 +165,7 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
           } catch (e) { console.error("Groq AI parse error", e); }
         } else {
           // Fallback keyword mock logic
-          const lowerBody = bodySnippet.toLowerCase();
+          const lowerBody = fullBody.toLowerCase();
           if (lowerBody.includes('interview') || lowerBody.includes('next steps') || lowerBody.includes('schedule')) {
             sentiment = 'positive';
             date_time = new Date(Date.now() + 86400000).toISOString(); // tomorrow
@@ -157,6 +179,7 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
             .set({
               status: sentiment === 'positive' ? 'replied_positive' : (sentiment === 'negative' ? 'replied_negative' : 'replied'),
               responseSentiment: sentiment,
+              replyBody: fullBody,
               updatedAt: new Date()
             })
             .where(eq(outreachTargets.id, matchedEmail.targetId));
