@@ -106,6 +106,7 @@ router.post('/gmail', async (req: any, res) => {
         console.log(`[Webhook] Matched reply from ${fromHeader} for target ${matchedEmail.targetId}`);
 
         const bodySnippet = msgData.snippet || '';
+        console.log(`[Webhook] Email Snippet sent to AI: "${bodySnippet}"`);
         let sentiment = 'neutral';
         let date_time = new Date().toISOString();
         let platform = 'Other';
@@ -124,7 +125,7 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
                 'Content-Type': 'application/json'
               },
               body: JSON.stringify({
-                model: 'llama3-8b-8192',
+                model: 'llama3-70b-8192',
                 response_format: { type: 'json_object' },
                 messages: [{ role: 'user', content: prompt }]
               })
