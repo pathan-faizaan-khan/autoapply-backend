@@ -2,7 +2,6 @@ import { Router } from 'express';
 import { db } from '../db/index.js';
 import { users, coldEmails, outreachTargets, interviews } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
-import { GoogleGenAI } from '@google/genai';
 
 const router = Router();
 
@@ -71,8 +70,6 @@ router.post('/gmail', async (req: any, res) => {
     .leftJoin(outreachTargets, eq(coldEmails.targetId, outreachTargets.id))
     .where(and(eq(coldEmails.userId, user.id), eq(coldEmails.status, 'sent')));
 
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
-
     // 5. Process newly added messages
     for (const record of historyData.history) {
       if (!record.messagesAdded) continue;
@@ -97,6 +94,7 @@ router.post('/gmail', async (req: any, res) => {
         );
 
         if (!matchedEmail) continue;
+        console.log(`[Webhook] Matched reply from ${fromHeader} for target ${matchedEmail.targetId}`);
 
         const bodySnippet = msgData.snippet || '';
         let sentiment = 'neutral';
@@ -104,22 +102,35 @@ router.post('/gmail', async (req: any, res) => {
         let platform = 'Other';
         let link = '';
         
-        if (process.env.GEMINI_API_KEY) {
+        if (process.env.GROQ_API_KEY) {
           try {
             const prompt = `Analyze this HR email reply. Determine if it is a positive possibility (scheduling an interview) or negative (rejection). 
 Email: "${bodySnippet}"
 Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral", "dateTime": "ISO 8601 string if positive, else null", "platform": "Google Meet/Zoom/Teams/Other if positive", "link": "meeting link if present"}`;
-            const aiResponse = await ai.models.generateContent({
-               model: 'gemini-2.5-flash',
-               contents: prompt,
-               config: { responseMimeType: 'application/json' }
+            
+            const aiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${process.env.GROQ_API_KEY}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                model: 'llama3-8b-8192',
+                response_format: { type: 'json_object' },
+                messages: [{ role: 'user', content: prompt }]
+              })
             });
-            const result = JSON.parse(aiResponse.text || '{}');
+            const aiData = await aiResponse.json();
+            const resultText = aiData.choices?.[0]?.message?.content || '{}';
+            const result = JSON.parse(resultText);
+            
             sentiment = result.sentiment || 'neutral';
             if (result.dateTime) date_time = result.dateTime;
             if (result.platform) platform = result.platform;
             if (result.link) link = result.link;
-          } catch(e) { console.error("GenAI parse error", e); }
+            
+            console.log(`[Webhook] Groq AI determined sentiment: ${sentiment}`);
+          } catch(e) { console.error("Groq AI parse error", e); }
         } else {
           // Fallback keyword mock logic
           const lowerBody = bodySnippet.toLowerCase();
