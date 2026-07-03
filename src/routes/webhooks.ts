@@ -16,7 +16,7 @@ router.post('/gmail', async (req: any, res) => {
     const { emailAddress, historyId } = JSON.parse(decodedData);
 
     if (!emailAddress || !historyId) return res.status(400).send('Bad Request');
-    
+
     console.log(`[Webhook] Received push notification for ${emailAddress} with historyId: ${historyId}`);
 
     // 1. Look up the user by emailAddress
@@ -40,7 +40,7 @@ router.post('/gmail', async (req: any, res) => {
     const tokenData = await tokenRes.json();
     if (!tokenData.access_token) {
       console.error(`Failed to refresh token for ${emailAddress}`);
-      return res.status(200).send('OK'); 
+      return res.status(200).send('OK');
     }
     const accessToken = tokenData.access_token;
 
@@ -67,9 +67,9 @@ router.post('/gmail', async (req: any, res) => {
       company: outreachTargets.companyName,
       role: outreachTargets.jobTitle
     })
-    .from(coldEmails)
-    .leftJoin(outreachTargets, eq(coldEmails.targetId, outreachTargets.id))
-    .where(and(eq(coldEmails.userId, user.id), eq(coldEmails.status, 'sent')));
+      .from(coldEmails)
+      .leftJoin(outreachTargets, eq(coldEmails.targetId, outreachTargets.id))
+      .where(and(eq(coldEmails.userId, user.id), eq(coldEmails.status, 'sent')));
 
     // 5. Process newly added messages
     console.log(`[Webhook] Found ${historyData.history.length} history records to process.`);
@@ -82,7 +82,7 @@ router.post('/gmail', async (req: any, res) => {
       for (const added of record.messagesAdded) {
         const msgId = added.message.id;
         console.log(`[Webhook] Fetching full message for ID: ${msgId}`);
-        
+
         // Fetch full message
         const msgRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}`, {
           headers: { 'Authorization': `Bearer ${accessToken}` }
@@ -94,8 +94,8 @@ router.post('/gmail', async (req: any, res) => {
         const fromHeader = headers.find((h: any) => h.name.toLowerCase() === 'from')?.value || '';
 
         // Match logic
-        const matchedEmail = sentEmails.find(se => 
-          (se.contactEmail && fromHeader.includes(se.contactEmail)) || 
+        const matchedEmail = sentEmails.find(se =>
+          (se.contactEmail && fromHeader.includes(se.contactEmail)) ||
           (se.subject && subjectHeader.replace(/^(Re|Fwd):\s*/i, '').trim() === se.subject?.trim())
         );
 
@@ -110,13 +110,13 @@ router.post('/gmail', async (req: any, res) => {
         let date_time = new Date().toISOString();
         let platform = 'Other';
         let link = '';
-        
+
         if (process.env.GROQ_API_KEY) {
           try {
             const prompt = `Analyze this HR email reply. Determine if it is a positive possibility (scheduling an interview) or negative (rejection). 
 Email: "${bodySnippet}"
 Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral", "dateTime": "ISO 8601 string if positive, else null", "platform": "Google Meet/Zoom/Teams/Other if positive", "link": "meeting link if present"}`;
-            
+
             const aiResponse = await fetch('https://api.groq.com/openai/v1/chat/completions', {
               method: 'POST',
               headers: {
@@ -132,45 +132,47 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
             const aiData = await aiResponse.json();
             const resultText = aiData.choices?.[0]?.message?.content || '{}';
             const result = JSON.parse(resultText);
-            
+
             sentiment = result.sentiment || 'neutral';
             if (result.dateTime) date_time = result.dateTime;
             if (result.platform) platform = result.platform;
             if (result.link) link = result.link;
-            
+
             console.log(`[Webhook] Groq AI determined sentiment: ${sentiment}`);
-          } catch(e) { console.error("Groq AI parse error", e); }
+          } catch (e) { console.error("Groq AI parse error", e); }
         } else {
           // Fallback keyword mock logic
           const lowerBody = bodySnippet.toLowerCase();
           if (lowerBody.includes('interview') || lowerBody.includes('next steps') || lowerBody.includes('schedule')) {
-             sentiment = 'positive';
-             date_time = new Date(Date.now() + 86400000).toISOString(); // tomorrow
+            sentiment = 'positive';
+            date_time = new Date(Date.now() + 86400000).toISOString(); // tomorrow
           } else if (lowerBody.includes('unfortunately') || lowerBody.includes('regret') || lowerBody.includes('not selected')) {
-             sentiment = 'negative';
+            sentiment = 'negative';
           }
         }
 
         if (matchedEmail.targetId) {
           await db.update(outreachTargets)
-            .set({ 
-               status: sentiment === 'positive' ? 'replied_positive' : (sentiment === 'negative' ? 'replied_negative' : 'replied'),
-               responseSentiment: sentiment,
-               updatedAt: new Date()
+            .set({
+              status: sentiment === 'positive' ? 'replied_positive' : (sentiment === 'negative' ? 'replied_negative' : 'replied'),
+              responseSentiment: sentiment,
+              updatedAt: new Date()
             })
             .where(eq(outreachTargets.id, matchedEmail.targetId));
-          
+          console.log(`[Webhook] Successfully updated target ${matchedEmail.targetId} in the database (Sentiment: ${sentiment}).`);
+
           if (sentiment === 'positive') {
-             await db.insert(interviews).values({
-                userId: user.id,
-                targetId: matchedEmail.targetId,
-                company: matchedEmail.company || 'Unknown',
-                role: matchedEmail.role || 'Unknown',
-                dateTime: new Date(date_time),
-                platform,
-                link,
-                status: 'scheduled'
-             });
+            console.log(`[Webhook] Positive reply detected! Scheduling interview for target ${matchedEmail.targetId}...`);
+            await db.insert(interviews).values({
+              userId: user.id,
+              targetId: matchedEmail.targetId,
+              company: matchedEmail.company || 'Unknown',
+              role: matchedEmail.role || 'Unknown',
+              dateTime: new Date(date_time),
+              platform,
+              link,
+              status: 'scheduled'
+            });
           }
         }
       }
@@ -178,7 +180,7 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
 
     // 6. Update user history ID
     await db.update(users).set({ gmailHistoryId: historyId.toString() }).where(eq(users.id, user.id));
-    
+
     res.status(200).send('OK'); // Always return 200 OK so Pub/Sub doesn't retry
   } catch (err) {
     console.error("Webhook processing error:", err);
