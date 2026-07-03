@@ -17,6 +17,8 @@ router.post('/gmail', async (req: any, res) => {
     const { emailAddress, historyId } = JSON.parse(decodedData);
 
     if (!emailAddress || !historyId) return res.status(400).send('Bad Request');
+    
+    console.log(`[Webhook] Received push notification for ${emailAddress} with historyId: ${historyId}`);
 
     // 1. Look up the user by emailAddress
     const [user] = await db.select().from(users).where(eq(users.email, emailAddress));
