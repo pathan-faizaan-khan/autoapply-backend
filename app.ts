@@ -7,6 +7,7 @@ import jobsRoutes from './src/routes/jobs.js';
 import outreachRoutes from './src/routes/outreach.js';
 import interviewsRoutes from './src/routes/interviews.js';
 import webhookRoutes from './src/routes/webhooks.js';
+import extensionRoutes from './src/routes/extension.js';
 import { authenticateToken } from './src/middleware/auth.js';
 
 dotenv.config();
@@ -21,6 +22,7 @@ app.use('/api/resumes', authenticateToken, resumeRoutes);
 app.use('/api/jobs', authenticateToken, jobsRoutes);
 app.use('/api/outreach', authenticateToken, outreachRoutes);
 app.use('/api/interviews', authenticateToken, interviewsRoutes);
+app.use('/api/extension', authenticateToken, extensionRoutes);
 app.use('/api/webhooks', webhookRoutes); // Public endpoint for Pub/Sub
 
 import profileRoutes from './src/routes/profile.js';
