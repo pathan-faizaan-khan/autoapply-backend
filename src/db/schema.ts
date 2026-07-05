@@ -44,6 +44,7 @@ export const jobApplications = pgTable('job_applications', {
   status: varchar('status', { length: 50 }).default('APPLIED').notNull(),
   applicationType: varchar('application_type', { length: 50 }).default('platform').notNull(),
   appliedAt: timestamp('applied_at').defaultNow().notNull(),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 
 // --- NEW RESUME TABLES ---
@@ -196,6 +197,7 @@ export const interviews = pgTable('interviews', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   targetId: integer('target_id').references(() => outreachTargets.id, { onDelete: 'cascade' }),
+  jobApplicationId: integer('job_application_id').references(() => jobApplications.id, { onDelete: 'cascade' }),
   company: varchar('company', { length: 255 }).notNull(),
   role: varchar('role', { length: 255 }).notNull(),
   dateTime: timestamp('date_time').notNull(),
@@ -214,6 +216,7 @@ export const selections = pgTable('selections', {
   userId: integer('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),
   targetId: integer('target_id').references(() => outreachTargets.id, { onDelete: 'cascade' }),
   coldEmailId: integer('cold_email_id').references(() => coldEmails.id, { onDelete: 'set null' }),
+  jobApplicationId: integer('job_application_id').references(() => jobApplications.id, { onDelete: 'cascade' }),
   company: varchar('company', { length: 255 }).notNull(),
   role: varchar('role', { length: 255 }),
   offerBody: text('offer_body'),           // full text of the offer/selection email

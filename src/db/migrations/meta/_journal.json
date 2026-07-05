@@ -22,6 +22,13 @@
       "when": 1783095961798,
       "tag": "0002_clammy_rogue",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1783249164840,
+      "tag": "0003_vengeful_slayback",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import express from 'express';
 import { db } from '../db/index.js'; // Assuming there is a db index
-import { scrapedJobs, userProfiles, resumes, resumePersonalInfo, resumeSkills } from '../db/schema.js';
+import { scrapedJobs, userProfiles, resumes, resumePersonalInfo, resumeSkills, jobApplications } from '../db/schema.js';
 import { desc, eq } from 'drizzle-orm';
 import fetch from 'node-fetch';
 
@@ -133,6 +133,37 @@ router.post('/google-search', async (req, res) => {
   } catch (error) {
     console.error('Error in google-search:', error);
     res.status(500).json({ error: 'Failed to search jobs' });
+  }
+});
+
+// POST /api/jobs/apply-click - register that a user clicked apply on a job
+router.post('/apply-click', async (req, res) => {
+  try {
+    const userId = (req as any).user?.userId;
+    if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { jobTitle, companyName, jobUrl } = req.body;
+    if (!jobTitle || !companyName) {
+      return res.status(400).json({ error: 'jobTitle and companyName required' });
+    }
+
+    // Insert as CLICKED if not already exists for this URL
+    // Actually we shouldn't fail if exists, we can update or ignore
+    await db.insert(jobApplications).values({
+      userId,
+      jobTitle,
+      companyName,
+      jobUrl: jobUrl || '',
+      status: 'CLICKED',
+      applicationType: 'platform',
+      appliedAt: new Date(),
+      updatedAt: new Date(),
+    });
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error in apply-click:', error);
+    res.status(500).json({ error: 'Failed to record apply click' });
   }
 });
 

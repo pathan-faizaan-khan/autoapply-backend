@@ -13,7 +13,7 @@ import {
   userProfiles,
   jobApplications
 } from '../db/schema.js';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 
 const router = Router();
 
@@ -79,14 +79,32 @@ router.post('/track', authenticateToken, async (req: any, res) => {
       return res.status(400).json({ error: 'jobTitle and companyName are required' });
     }
 
-    await db.insert(jobApplications).values({
-      userId,
-      jobTitle,
-      companyName,
-      jobUrl,
-      status: 'APPLIED',
-      applicationType: 'extension',
-    });
+    // See if one exists already (maybe from clicking Apply in dashboard)
+    const existing = await db.select().from(jobApplications)
+      .where(and(
+        eq(jobApplications.userId, userId),
+        eq(jobApplications.companyName, companyName),
+        eq(jobApplications.jobTitle, jobTitle)
+      )).limit(1);
+
+    if (existing.length > 0) {
+      await db.update(jobApplications).set({
+        status: 'APPLIED',
+        applicationType: 'extension',
+        updatedAt: new Date()
+      }).where(eq(jobApplications.id, existing[0].id));
+    } else {
+      await db.insert(jobApplications).values({
+        userId,
+        jobTitle,
+        companyName,
+        jobUrl: jobUrl || '',
+        status: 'APPLIED',
+        applicationType: 'extension',
+        appliedAt: new Date(),
+        updatedAt: new Date()
+      });
+    }
 
     res.json({ success: true, message: 'Application tracked successfully' });
   } catch (err) {

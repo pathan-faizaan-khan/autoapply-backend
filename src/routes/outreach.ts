@@ -13,6 +13,7 @@ import {
   users,
   interviews,
   selections,
+  jobApplications,
 } from '../db/schema.js';
 import { eq, desc, and } from 'drizzle-orm';
 import puppeteer from 'puppeteer';
@@ -210,7 +211,7 @@ router.get('/history', async (req: any, res) => {
   try {
     const userId = getUserId(req);
 
-    const history = await db.select({
+    const emailHistory = await db.select({
       email: coldEmails,
       target: outreachTargets,
       campaign: outreachCampaigns,
@@ -221,7 +222,55 @@ router.get('/history', async (req: any, res) => {
     .where(eq(coldEmails.userId, userId))
     .orderBy(desc(coldEmails.createdAt));
 
-    res.json({ history });
+    // Fetch ALL job applications to show in history (Dashboard clicks & extension)
+    const allApps = await db.select()
+      .from(jobApplications)
+      .where(eq(jobApplications.userId, userId));
+
+    // Map apps to HistoryRecord format
+    const mappedApps = allApps.map(app => {
+      const isExt = app.applicationType === 'extension';
+      const isClicked = app.status === 'CLICKED';
+      
+      let subject = 'Direct Application';
+      if (isExt) subject = 'Applied via Chrome Extension';
+      else if (isClicked) subject = 'Saved via Dashboard';
+
+      let bodyText = `You applied to the ${app.jobTitle} position at ${app.companyName}.`;
+      if (isExt) bodyText = `You successfully auto-applied to the ${app.jobTitle} position at ${app.companyName} using the Auto-Apply Chrome Extension.`;
+      else if (isClicked) bodyText = `You clicked apply for the ${app.jobTitle} position at ${app.companyName} from the dashboard. Pending extension auto-apply.`;
+
+      return {
+        email: {
+          id: app.id + 1000000, // mock id to avoid collision
+          subject: subject,
+          body: bodyText,
+          status: app.status.toLowerCase(),
+          sentAt: app.appliedAt,
+          createdAt: app.appliedAt,
+          tailoredResumeJson: ''
+        },
+        target: {
+          companyName: app.companyName,
+          contactName: null,
+          contactEmail: null,
+          jobTitle: app.jobTitle,
+          status: app.status.toLowerCase(),
+          responseSentiment: null,
+          replyBody: null
+        },
+        campaign: null
+      };
+    });
+
+    // Combine and sort by date descending
+    const combinedHistory = [...emailHistory, ...mappedApps].sort((a: any, b: any) => {
+      const dateA = new Date(a.email.createdAt).getTime();
+      const dateB = new Date(b.email.createdAt).getTime();
+      return dateB - dateA;
+    });
+
+    res.json({ history: combinedHistory });
   } catch (err) {
     console.error("History fetch error:", err);
     res.status(500).json({ error: 'Failed to fetch outreach history' });
@@ -443,8 +492,12 @@ router.post('/sync-replies', async (req: any, res) => {
     .leftJoin(outreachTargets, eq(coldEmails.targetId, outreachTargets.id))
     .where(and(eq(coldEmails.userId, userId), eq(coldEmails.status, 'sent')));
 
-    if (sentEmails.length === 0) {
-      return res.json({ success: true, processed: 0, message: "No sent emails to match" });
+    const userApps = await db.select()
+      .from(jobApplications)
+      .where(and(eq(jobApplications.userId, userId), eq(jobApplications.status, 'APPLIED')));
+
+    if (sentEmails.length === 0 && userApps.length === 0) {
+      return res.json({ success: true, processed: 0, message: "No active campaigns or applications to match" });
     }
 
     // Fetch recent received emails from gmail
@@ -473,7 +526,18 @@ router.post('/sync-replies', async (req: any, res) => {
         (se.subject && subjectHeader.replace(/^(Re|Fwd):\s*/i, '').trim() === se.subject?.trim())
       );
 
-      if (!matchedEmail) continue;
+      let matchedApp = null;
+      if (!matchedEmail) {
+        // Fallback: match by company name if the fromHeader or body contains it
+        matchedApp = userApps.find(app => 
+           app.companyName.length > 2 && (
+             fromHeader.toLowerCase().includes(app.companyName.toLowerCase()) ||
+             subjectHeader.toLowerCase().includes(app.companyName.toLowerCase())
+           )
+        );
+      }
+
+      if (!matchedEmail && !matchedApp) continue;
 
       const bodySnippet = msgData.snippet || '';
       let sentiment = 'neutral';
@@ -508,7 +572,7 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
         }
       }
 
-      if (matchedEmail.targetId) {
+      if (matchedEmail && matchedEmail.targetId) {
         await db.update(outreachTargets)
           .set({ 
              status: sentiment === 'positive' ? 'interview' : (sentiment === 'negative' ? 'not_selected' : 'replied'),
@@ -523,6 +587,27 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
               targetId: matchedEmail.targetId,
               company: matchedEmail.company || 'Unknown',
               role: matchedEmail.role || 'Unknown',
+              dateTime: new Date(date_time),
+              platform,
+              link,
+              status: 'scheduled'
+           });
+        }
+      } else if (matchedApp) {
+        await db.update(jobApplications)
+          .set({ 
+             status: sentiment === 'positive' ? 'INTERVIEW' : (sentiment === 'negative' ? 'REJECTED' : 'REPLIED'),
+             updatedAt: new Date()
+          })
+          .where(eq(jobApplications.id, matchedApp.id));
+        
+        if (sentiment === 'positive') {
+           // Insert interview entry
+           await db.insert(interviews).values({
+              userId,
+              jobApplicationId: matchedApp.id,
+              company: matchedApp.companyName || 'Unknown',
+              role: matchedApp.jobTitle || 'Unknown',
               dateTime: new Date(date_time),
               platform,
               link,
