@@ -148,17 +148,37 @@ router.post('/google', async (req: Request, res: Response): Promise<void> => {
   try {
     const { credential } = req.body;
     
-    const ticket = await googleClient.verifyIdToken({
-      idToken: credential,
-      audience: process.env.GOOGLE_CLIENT_ID,
-    });
-    const payload = ticket.getPayload();
-    if (!payload) {
-      res.status(400).json({ error: 'Invalid Google token' });
-      return;
+    let email, name, googleId;
+
+    try {
+      // Try validating as an ID Token (from the Web App)
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+      const payload = ticket.getPayload();
+      if (payload) {
+        email = payload.email;
+        name = payload.name;
+        googleId = payload.sub;
+      }
+    } catch (verifyError) {
+      // If it fails, it might be an Access Token (from the Chrome Extension)
+      try {
+        const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+          headers: { Authorization: `Bearer ${credential}` }
+        });
+        if (!userInfoRes.ok) throw new Error('Failed to fetch userinfo');
+        const data = await userInfoRes.json();
+        email = data.email;
+        name = data.name;
+        googleId = data.sub;
+      } catch (accessError) {
+        res.status(400).json({ error: 'Invalid Google token' });
+        return;
+      }
     }
 
-    const { email, name, sub: googleId } = payload;
     if (!email) {
       res.status(400).json({ error: 'No email found in Google token' });
       return;
