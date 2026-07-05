@@ -10,7 +10,8 @@ import {
   resumeProjects,
   resumeCertifications,
   resumeLanguages,
-  userProfiles
+  userProfiles,
+  jobApplications
 } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 
@@ -64,6 +65,32 @@ router.get('/user-data', authenticateToken, async (req: any, res) => {
     res.json({ success: true, userData });
   } catch (err) {
     console.error('Extension fetch user-data error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// POST /api/extension/track -> track a job application filled by the extension
+router.post('/track', authenticateToken, async (req: any, res) => {
+  try {
+    const userId = getUserId(req);
+    const { jobTitle, companyName, jobUrl } = req.body;
+
+    if (!jobTitle || !companyName) {
+      return res.status(400).json({ error: 'jobTitle and companyName are required' });
+    }
+
+    await db.insert(jobApplications).values({
+      userId,
+      jobTitle,
+      companyName,
+      jobUrl,
+      status: 'APPLIED',
+      applicationType: 'extension',
+    });
+
+    res.json({ success: true, message: 'Application tracked successfully' });
+  } catch (err) {
+    console.error('Extension track application error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });

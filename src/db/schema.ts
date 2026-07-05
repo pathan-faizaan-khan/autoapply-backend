@@ -42,6 +42,7 @@ export const jobApplications = pgTable('job_applications', {
   companyName: varchar('company_name', { length: 255 }).notNull(),
   jobUrl: varchar('job_url', { length: 1000 }),
   status: varchar('status', { length: 50 }).default('APPLIED').notNull(),
+  applicationType: varchar('application_type', { length: 50 }).default('platform').notNull(),
   appliedAt: timestamp('applied_at').defaultNow().notNull(),
 });
 
