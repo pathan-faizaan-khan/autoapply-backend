@@ -511,7 +511,7 @@ Respond in strict JSON format: {"sentiment": "positive" | "negative" | "neutral"
       if (matchedEmail.targetId) {
         await db.update(outreachTargets)
           .set({ 
-             status: sentiment === 'positive' ? 'replied_positive' : (sentiment === 'negative' ? 'replied_negative' : 'replied'),
+             status: sentiment === 'positive' ? 'interview' : (sentiment === 'negative' ? 'not_selected' : 'replied'),
              responseSentiment: sentiment 
           })
           .where(eq(outreachTargets.id, matchedEmail.targetId));

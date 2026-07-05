@@ -2,6 +2,19 @@ import { Router } from 'express';
 import { db } from '../db/index.js';
 import { users, coldEmails, outreachTargets, interviews, selections } from '../db/schema.js';
 import { eq, and } from 'drizzle-orm';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { v4 as uuidv4 } from 'uuid';
+
+const s3Client = new S3Client({
+  region: process.env.S3_REGION || 'auto',
+  endpoint: process.env.S3_ENDPOINT,
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY || ''
+  },
+  forcePathStyle: true,
+});
+
 
 // Helper to extract full plain text from Gmail payload
 function extractPlainText(payload: any): string {
@@ -202,17 +215,24 @@ You MUST respond in strict JSON format:
         }
 
         if (matchedEmail.targetId) {
+          // Fetch existing target to concatenate replyBody
+          const [existingTarget] = await db.select().from(outreachTargets).where(eq(outreachTargets.id, matchedEmail.targetId));
+          const currentReplyBody = existingTarget?.replyBody || '';
+          const newReplyBody = currentReplyBody 
+            ? `${currentReplyBody}\n\n--- [${new Date().toLocaleString()}] ---\n\n${fullBody}`
+            : fullBody;
+
           // Determine new status and sentiment based on email type
           let newStatus: string;
-          if (emailType === 'interview_invite') newStatus = 'replied_positive';
+          if (emailType === 'interview_invite') newStatus = 'interview';
           else if (emailType === 'job_offer') newStatus = 'selected';
-          else newStatus = 'replied_negative';
+          else newStatus = 'not_selected';
 
           await db.update(outreachTargets)
             .set({
               status: newStatus,
               responseSentiment: emailType === 'rejection' ? 'negative' : 'positive',
-              replyBody: fullBody,
+              replyBody: newReplyBody,
               updatedAt: new Date()
             })
             .where(eq(outreachTargets.id, matchedEmail.targetId));
@@ -234,6 +254,39 @@ You MUST respond in strict JSON format:
             console.log(`[Webhook] Interview entry created for ${matchedEmail.company}`);
 
           } else if (emailType === 'job_offer') {
+            // Check for PDF/DOCX attachments (offer letter)
+            let offerUrl: string | undefined = undefined;
+            if (msgData.payload?.parts) {
+              for (const part of msgData.payload.parts) {
+                if (part.filename && (part.mimeType === 'application/pdf' || part.filename.endsWith('.pdf'))) {
+                  console.log(`[Webhook] Found attachment: ${part.filename}`);
+                  try {
+                    const attachRes = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msgId}/attachments/${part.body.attachmentId}`, {
+                      headers: { 'Authorization': `Bearer ${accessToken}` }
+                    });
+                    const attachData = await attachRes.json();
+                    if (attachData.data) {
+                      const buffer = Buffer.from(attachData.data.replace(/-/g, '+').replace(/_/g, '/'), 'base64');
+                      const fileExt = part.filename.split('.').pop() || 'pdf';
+                      const s3FileName = `${user.id}/offer-${uuidv4()}.${fileExt}`;
+                      
+                      await s3Client.send(new PutObjectCommand({
+                        Bucket: process.env.S3_BUCKET || 'autoapply',
+                        Key: s3FileName,
+                        Body: buffer,
+                        ContentType: part.mimeType,
+                      }));
+                      offerUrl = `${process.env.S3_ENDPOINT}/${process.env.S3_BUCKET}/${s3FileName}`;
+                      console.log(`[Webhook] Offer letter uploaded to S3: ${offerUrl}`);
+                    }
+                  } catch (attachErr) {
+                    console.error('[Webhook] Failed to process attachment', attachErr);
+                  }
+                  break; // only take the first relevant attachment
+                }
+              }
+            }
+
             // Save offer letter to selections table
             console.log(`[Webhook] Job offer detected! Saving to selections table for target ${matchedEmail.targetId}...`);
             await db.insert(selections).values({
@@ -243,6 +296,7 @@ You MUST respond in strict JSON format:
               company: matchedEmail.company || 'Unknown',
               role: matchedEmail.role || null,
               offerBody: fullBody,
+              offerUrl, // S3 link
               recruiterName: fromHeader.replace(/<.*>/, '').trim() || null,
               recruiterEmail: fromHeader.match(/<(.+)>/)?.[1] || fromHeader.trim() || null,
               receivedAt: new Date(),

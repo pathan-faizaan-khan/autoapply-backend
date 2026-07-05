@@ -216,6 +216,7 @@ export const selections = pgTable('selections', {
   company: varchar('company', { length: 255 }).notNull(),
   role: varchar('role', { length: 255 }),
   offerBody: text('offer_body'),           // full text of the offer/selection email
+  offerUrl: varchar('offer_url', { length: 1000 }), // S3 URL to the attached offer letter PDF
   recruiterName: varchar('recruiter_name', { length: 255 }),
   recruiterEmail: varchar('recruiter_email', { length: 255 }),
   receivedAt: timestamp('received_at').defaultNow().notNull(),
