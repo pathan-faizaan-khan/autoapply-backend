@@ -30,3 +30,7 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# Puppeteer
+.cache/
+.puppeteerrc.cjs
