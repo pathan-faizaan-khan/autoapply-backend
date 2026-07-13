@@ -70,7 +70,7 @@ export async function runAutomationEngine(
           query: role,
           location: campaign.workStyle === "Remote" ? "remote" : (campaign.locationPref || "any"),
           company_type: (companyTypes[0] || "any").toLowerCase(),
-          num_results: targetEmailCount * 2, // overfetch to account for missing contacts
+          num_results: Math.min(targetEmailCount * 2, 50), // cap at 50 to avoid heavy scraping
         }),
       });
 

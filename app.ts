@@ -28,7 +28,6 @@ app.use('/api/webhooks', webhookRoutes); // Public endpoint for Pub/Sub
 import profileRoutes from './src/routes/profile.js';
 app.use('/api/profile', authenticateToken, profileRoutes);
 
-// Start Cron Jobs
 import { startCronJobs } from './src/utils/cron.js';
 startCronJobs();
 
