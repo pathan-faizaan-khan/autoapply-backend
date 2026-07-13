@@ -8,17 +8,19 @@ import {
   resumeExperiences,
   resumeSkills,
   resumeProjects,
-  resumeEducations
+  resumeEducations,
+  users
 } from '../db/schema.js';
 import { eq, desc } from 'drizzle-orm';
 import puppeteer from 'puppeteer';
 import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import { generateResumeHtml } from './resumeTemplate.js';
+import { OAuth2Client } from 'google-auth-library';
 
 export async function runAutomationEngine(
   campaignId: number, 
   targetEmailCount: number, 
-  googleAccessToken: string,
+  passedAccessToken: string,
   fastApiUrl: string
 ) {
   console.log(`[Automation] Starting campaign ${campaignId} for ${targetEmailCount} emails`);
@@ -29,6 +31,24 @@ export async function runAutomationEngine(
     
     const [campaign] = await db.select().from(outreachCampaigns).where(eq(outreachCampaigns.id, campaignId));
     if (!campaign) throw new Error("Campaign not found");
+
+    // Fetch user to get Google refresh token
+    const [user] = await db.select().from(users).where(eq(users.id, campaign.userId));
+    if (!user || !user.googleRefreshToken) {
+      throw new Error("User has not connected Gmail (Missing Refresh Token)");
+    }
+
+    const oauth2Client = new OAuth2Client(
+      process.env.GOOGLE_CLIENT_ID,
+      process.env.GOOGLE_CLIENT_SECRET
+    );
+    oauth2Client.setCredentials({ refresh_token: user.googleRefreshToken });
+    const { token } = await oauth2Client.getAccessToken();
+    const googleAccessToken = token;
+
+    if (!googleAccessToken) {
+      throw new Error("Failed to generate fresh Google access token from refresh token");
+    }
 
     const targetRoles = JSON.parse(campaign.targetRoles || "[]");
     const companyTypes = JSON.parse(campaign.companyTypes || "[]");
@@ -226,7 +246,8 @@ export async function runAutomationEngine(
         });
 
         if (!gmailRes.ok) {
-          console.error(`[Automation] Failed to send email to ${contact.email}`);
+          const errorText = await gmailRes.text();
+          console.error(`[Automation] Failed to send email to ${contact.email}. Gmail API error: ${gmailRes.status} ${errorText}`);
           // Revert status
           await db.update(coldEmails).set({ status: 'draft' }).where(eq(coldEmails.id, emailRecord.id));
           continue;
