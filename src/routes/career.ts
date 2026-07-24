@@ -46,7 +46,8 @@ router.post('/chat', async (req, res) => {
       message,
       resume_data: resumeText ? { summary: resumeText, skills } : null,
       target_role: targetRole || null,
-      career_path: null
+      career_path: null,
+      reset_session: req.body.reset_session || false
     };
 
     const response = await fetch(`${FASTAPI_URL}/api/career/chat`, {
