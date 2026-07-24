@@ -137,4 +137,39 @@ router.post('/generate-roadmap', async (req, res) => {
   }
 });
 
+// POST /api/career/progress/update
+router.post('/progress/update', async (req, res) => {
+  try {
+    const userId = (req as any).user.userId;
+    const { step_id, status, completion_percentage, score, notes } = req.body;
+
+    const payload = {
+      user_id: userId.toString(),
+      step_id,
+      status,
+      completion_percentage,
+      score,
+      notes
+    };
+
+    const response = await fetch(`${FASTAPI_URL}/api/career/progress/update`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("FastAPI Error (/progress/update):", errorText);
+      return res.status(response.status).json({ error: "Failed to update progress" });
+    }
+
+    const data = await response.json();
+    return res.json(data);
+  } catch (error) {
+    console.error('Error in /api/career/progress/update:', error);
+    res.status(500).json({ error: 'Failed to update progress' });
+  }
+});
+
 export default router;
