@@ -3,6 +3,7 @@ import { client } from './index.js';
 async function main() {
   try {
     await client`ALTER TABLE "interviews" ADD COLUMN IF NOT EXISTS "job_application_id" integer;`;
+    await client`ALTER TABLE "user_profiles" ADD COLUMN IF NOT EXISTS "job_title" varchar(255);`;
     await client`ALTER TABLE "job_applications" ADD COLUMN IF NOT EXISTS "updated_at" timestamp DEFAULT now() NOT NULL;`;
     await client`ALTER TABLE "selections" ADD COLUMN IF NOT EXISTS "job_application_id" integer;`;
     await client`

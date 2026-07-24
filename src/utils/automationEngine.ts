@@ -1,7 +1,7 @@
 import { db } from '../db/index.js';
-import { 
-  outreachCampaigns, 
-  outreachTargets, 
+import {
+  outreachCampaigns,
+  outreachTargets,
   coldEmails,
   resumes,
   resumePersonalInfo,
@@ -17,18 +17,19 @@ import MailComposer from 'nodemailer/lib/mail-composer/index.js';
 import { generateResumeHtml } from './resumeTemplate.js';
 import { OAuth2Client } from 'google-auth-library';
 
+
 export async function runAutomationEngine(
-  campaignId: number, 
-  targetEmailCount: number, 
+  campaignId: number,
+  targetEmailCount: number,
   passedAccessToken: string,
   fastApiUrl: string
 ) {
   console.log(`[Automation] Starting campaign ${campaignId} for ${targetEmailCount} emails`);
-  
+
   try {
     // 1. Mark campaign as running
     await db.update(outreachCampaigns).set({ automationStatus: 'running' }).where(eq(outreachCampaigns.id, campaignId));
-    
+
     const [campaign] = await db.select().from(outreachCampaigns).where(eq(outreachCampaigns.id, campaignId));
     if (!campaign) throw new Error("Campaign not found");
 
@@ -52,13 +53,13 @@ export async function runAutomationEngine(
 
     const targetRoles = JSON.parse(campaign.targetRoles || "[]");
     const companyTypes = JSON.parse(campaign.companyTypes || "[]");
-    
+
     // 2. Fetch User's Resume Context
     const [latestResume] = await db.select().from(resumes)
       .where(eq(resumes.userId, campaign.userId))
       .orderBy(desc(resumes.createdAt))
       .limit(1);
-    
+
     if (!latestResume) throw new Error("No resume found for user");
 
     const [personalInfo] = await db.select().from(resumePersonalInfo).where(eq(resumePersonalInfo.resumeId, latestResume.id));
@@ -104,7 +105,7 @@ export async function runAutomationEngine(
       // 4. Process each company
       for (const job of jobs || []) {
         if (sentCount >= targetEmailCount) break;
-        
+
         console.log(`[Automation] Finding contacts at ${job.company_name}`);
         const contactRes = await fetch(`${fastApiUrl}/api/jobs/find-contacts`, {
           method: "POST",
@@ -122,7 +123,7 @@ export async function runAutomationEngine(
         }
         const contactData = await contactRes.json();
         const contact = contactData.contacts?.[0];
-        
+
         if (!contact || !contact.email) {
           console.log(`[Automation] No email found for ${job.company_name}, skipping.`);
           continue;
@@ -143,7 +144,7 @@ export async function runAutomationEngine(
               candidate_name: personalInfo?.name || "Candidate",
             }),
           });
-          
+
           if (!tailorRes.ok) {
             const errText = await tailorRes.text();
             throw new Error(`Tailor API failed: ${tailorRes.status} ${errText}`);
@@ -168,7 +169,7 @@ export async function runAutomationEngine(
             candidate_name: personalInfo?.name || "Candidate",
             candidate_skills: resumeContext.skills,
             candidate_summary: resumeContext.summary,
-            candidate_experience_summary: resumeContext.experience.slice(0, 2).map((e:any) => `${e.jobTitle} at ${e.companyName}`).join(", ")
+            candidate_experience_summary: resumeContext.experience.slice(0, 2).map((e: any) => `${e.jobTitle} at ${e.companyName}`).join(", ")
           }),
         });
 
@@ -204,7 +205,7 @@ export async function runAutomationEngine(
         let pdfBuffer: Buffer;
         try {
           const htmlContent = generateResumeHtml(tailored_resume);
-          const browser = await puppeteer.launch({ 
+          const browser = await puppeteer.launch({
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
           });
@@ -254,7 +255,7 @@ export async function runAutomationEngine(
         }
 
         console.log(`[Automation] Successfully sent email to ${contact.email}`);
-        
+
         sentCount++;
         await db.update(outreachCampaigns).set({ emailsSentCount: sentCount }).where(eq(outreachCampaigns.id, campaignId));
       }

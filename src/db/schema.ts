@@ -24,6 +24,7 @@ export const otps = pgTable('otps', {
 export const userProfiles = pgTable('user_profiles', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').references(() => users.id).notNull().unique(),
+  jobTitle: varchar('job_title', { length: 255 }),
   resumeText: text('resume_text'),
   linkedInUrl: varchar('linkedin_url', { length: 255 }),
   githubUrl: varchar('github_url', { length: 255 }),

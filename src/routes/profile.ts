@@ -82,20 +82,20 @@ router.get('/', async (req: AuthRequest, res) => {
 router.put('/', async (req: AuthRequest, res) => {
   try {
     const userId = req.user!.userId;
-    const { linkedInUrl, githubUrl, portfolioUrl, phone, address, skills, resumeText } = req.body;
+    const { linkedInUrl, githubUrl, portfolioUrl, phone, address, skills, resumeText, jobTitle } = req.body;
 
     const [existing] = await db.select().from(userProfiles).where(eq(userProfiles.userId, userId));
 
     if (existing) {
       await db.update(userProfiles)
         .set({
-          linkedInUrl, githubUrl, portfolioUrl, phone, address, skills, resumeText,
+          linkedInUrl, githubUrl, portfolioUrl, phone, address, skills, resumeText, jobTitle,
           updatedAt: new Date()
         })
         .where(eq(userProfiles.userId, userId));
     } else {
       await db.insert(userProfiles).values({
-        userId, linkedInUrl, githubUrl, portfolioUrl, phone, address, skills, resumeText
+        userId, linkedInUrl, githubUrl, portfolioUrl, phone, address, skills, resumeText, jobTitle
       });
     }
 
