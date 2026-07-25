@@ -58,8 +58,10 @@ router.post('/chat', async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("FastAPI Error (/chat):", errorText);
-      return res.status(response.status).json({ error: "Failed to communicate with AI agent" });
+      const isHtml = errorText.toLowerCase().includes('<!doctype html>');
+      console.error("FastAPI Error (/chat):", isHtml ? "HTML Error Page Received" : errorText);
+      const userMessage = response.status === 429 ? "AI service is currently busy. Please try again in a moment." : "Failed to communicate with AI agent";
+      return res.status(response.status).json({ error: userMessage });
     }
 
     const data = await response.json();
@@ -126,8 +128,10 @@ router.post('/generate-roadmap', async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("FastAPI Error (/generate-roadmap):", errorText);
-      return res.status(response.status).json({ error: "Failed to generate roadmap" });
+      const isHtml = errorText.toLowerCase().includes('<!doctype html>');
+      console.error("FastAPI Error (/generate-roadmap):", isHtml ? "HTML Error Page Received" : errorText);
+      const userMessage = response.status === 429 ? "AI service is currently busy. Please try again in a moment." : "Failed to generate roadmap";
+      return res.status(response.status).json({ error: userMessage });
     }
 
     const data = await response.json();
@@ -161,7 +165,8 @@ router.post('/progress/update', async (req, res) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error("FastAPI Error (/progress/update):", errorText);
+      const isHtml = errorText.toLowerCase().includes('<!doctype html>');
+      console.error("FastAPI Error (/progress/update):", isHtml ? "HTML Error Page Received" : errorText);
       return res.status(response.status).json({ error: "Failed to update progress" });
     }
 
