@@ -5,7 +5,7 @@ import { userProfiles, resumes, resumePersonalInfo, resumeSkills } from '../db/s
 import { eq, desc } from 'drizzle-orm';
 
 const router = express.Router();
-const FASTAPI_URL = process.env.FASTAPI_URL || "http://localhost:8001";
+const FASTAPI_URL = process.env.FASTAPI_URL || "http://127.0.0.1:8001";
 
 // Helper to get user profile data
 async function getUserProfileData(userId: number) {
