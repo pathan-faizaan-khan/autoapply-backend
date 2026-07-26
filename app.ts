@@ -31,6 +31,7 @@ import profileRoutes from './src/routes/profile.js';
 app.use('/api/profile', authenticateToken, profileRoutes);
 
 import { startCronJobs } from './src/utils/cron.js';
+import { wakeUpMlBackend } from './src/utils/mlWakeup.js';
 startCronJobs();
 
 // Example protected route
@@ -42,4 +43,8 @@ const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
+
+  // Wake up the ML backend (Render free-tier cold-start)
+  // Fire-and-forget — non-blocking, retries in background
+  wakeUpMlBackend();
 });
