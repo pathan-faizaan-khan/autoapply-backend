@@ -10,6 +10,7 @@ import webhookRoutes from './src/routes/webhooks.js';
 import extensionRoutes from './src/routes/extension.js';
 import careerRoutes from './src/routes/career.js';
 import { authenticateToken } from './src/middleware/auth.js';
+import { guestGuard, guestMutationGuard } from './src/middleware/guestGuard.js';
 
 dotenv.config();
 
@@ -18,17 +19,33 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ─── Public routes (no auth) ───────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
-app.use('/api/resumes', authenticateToken, resumeRoutes);
-app.use('/api/jobs', authenticateToken, jobsRoutes);
-app.use('/api/outreach', authenticateToken, outreachRoutes);
-app.use('/api/interviews', authenticateToken, interviewsRoutes);
-app.use('/api/extension', authenticateToken, extensionRoutes);
-app.use('/api/career', authenticateToken, careerRoutes);
 app.use('/api/webhooks', webhookRoutes); // Public endpoint for Pub/Sub
 
+// ─── Auth-required routes (with selective guest guards) ────────────────────
+// Guests CAN browse jobs (GET) but CANNOT apply/save (POST/PUT/DELETE)
+app.use('/api/jobs', authenticateToken, guestMutationGuard, jobsRoutes);
+
+// Guests CANNOT upload/manage resumes — full block on all methods
+app.use('/api/resumes', authenticateToken, guestGuard, resumeRoutes);
+
+// Guests CANNOT create outreach campaigns or send emails
+app.use('/api/outreach', authenticateToken, guestGuard, outreachRoutes);
+
+// Guests CAN browse interview records (read) but not create
+app.use('/api/interviews', authenticateToken, guestMutationGuard, interviewsRoutes);
+
+// Chrome extension routes — no guest access (extension not in scope)
+app.use('/api/extension', authenticateToken, extensionRoutes);
+
+// Career & profile — read access for guests, block mutations
+app.use('/api/career', authenticateToken, careerRoutes);
+
 import profileRoutes from './src/routes/profile.js';
-app.use('/api/profile', authenticateToken, profileRoutes);
+// Guests CANNOT modify their profile
+app.use('/api/profile', authenticateToken, guestGuard, profileRoutes);
+
 
 import { startCronJobs } from './src/utils/cron.js';
 import { wakeUpMlBackend } from './src/utils/mlWakeup.js';

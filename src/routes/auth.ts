@@ -212,4 +212,44 @@ router.post('/google', async (req: Request, res: Response): Promise<void> => {
   }
 });
 
+// ─── Guest Login ──────────────────────────────────────────────────────────────
+// Creates a one-time guest user account with a 24-hour JWT.
+// No email or password required — instant access.
+
+router.post('/guest', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { v4: uuidv4 } = await import('uuid');
+    const guestEmail = `guest_${uuidv4()}@autoapply.guest`;
+    const guestName = 'Guest User';
+
+    const inserted = await db.insert(users).values({
+      email: guestEmail,
+      name: guestName,
+      isVerified: true,
+      isGuest: true,
+    }).returning();
+
+    const user = inserted[0];
+    if (!user) {
+      res.status(500).json({ error: 'Failed to create guest account' });
+      return;
+    }
+
+    // 24-hour expiry for guests (vs 7d for real users)
+    const token = jwt.sign(
+      { userId: user.id, email: user.email, isGuest: true },
+      JWT_SECRET,
+      { expiresIn: '24h' }
+    );
+
+    res.status(200).json({
+      token,
+      user: { id: user.id, email: user.email, name: guestName, isGuest: true },
+    });
+  } catch (error) {
+    console.error('[Guest] Error creating guest session:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 export default router;

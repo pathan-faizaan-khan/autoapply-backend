@@ -1,11 +1,11 @@
 import cron from 'node-cron';
 import { db } from '../db/index.js';
 import { users } from '../db/schema.js';
-import { isNotNull, eq } from 'drizzle-orm';
+import { isNotNull, eq, and, lt } from 'drizzle-orm';
 import { OAuth2Client } from 'google-auth-library';
 
 export function startCronJobs() {
-  // Run daily at midnight: 0 0 * * *
+  // ─── Daily Gmail Watch Renewal ── runs at midnight UTC ───────────────────
   cron.schedule('0 0 * * *', async () => {
     console.log('[Cron] Running daily Gmail watch renewal task...');
     try {
@@ -29,7 +29,7 @@ export function startCronJobs() {
           const { token: access_token } = await oauth2Client.getAccessToken();
           
           if (!access_token) {
-            console.error(`[Cron] Could not get access token for user ${user.email}`);
+            console.error(`[Cron] Could not get access token for user ${user.email}`);;
             continue;
           }
 
@@ -63,5 +63,33 @@ export function startCronJobs() {
     }
   });
 
-  console.log('[Cron] Daily Gmail watch renewal cron job initialized.');
+  // ─── Guest User Cleanup ── runs at 1 AM UTC daily ─────────────────────────
+  // Deletes guest accounts (isGuest = true) older than 24 hours.
+  // Child records (resumes, applications, etc.) are cascade-deleted by the DB.
+  cron.schedule('0 1 * * *', async () => {
+    console.log('[Cron] Running guest user cleanup task...');
+    try {
+      const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24 hours ago
+
+      const deleted = await db
+        .delete(users)
+        .where(
+          and(
+            eq(users.isGuest, true),
+            lt(users.createdAt, cutoff)
+          )
+        )
+        .returning({ id: users.id, email: users.email });
+
+      if (deleted.length > 0) {
+        console.log(`[Cron] Cleaned up ${deleted.length} expired guest account(s).`);
+      } else {
+        console.log('[Cron] No expired guest accounts to clean up.');
+      }
+    } catch (err) {
+      console.error('[Cron] Fatal error in guest cleanup task:', err);
+    }
+  });
+
+  console.log('[Cron] Daily Gmail watch renewal + guest cleanup cron jobs initialized.');
 }

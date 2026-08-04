@@ -5,6 +5,7 @@ export interface AuthRequest extends Request {
   user?: {
     userId: number;
     email: string;
+    isGuest?: boolean;
   };
 }
 
@@ -17,13 +18,18 @@ export const authenticateToken = (req: AuthRequest, res: Response, next: NextFun
     return;
   }
 
-  jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret', (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret', (err, decoded) => {
     if (err) {
       res.status(403).json({ error: 'Invalid or expired token' });
       return;
     }
-    
-    req.user = user as { userId: number; email: string };
+
+    const payload = decoded as { userId: number; email: string; isGuest?: boolean };
+    req.user = {
+      userId: payload.userId,
+      email: payload.email,
+      isGuest: payload.isGuest === true,
+    };
     next();
   });
 };

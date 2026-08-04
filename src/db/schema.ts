@@ -7,6 +7,7 @@ export const users = pgTable('users', {
   name: varchar('name', { length: 255 }),
   googleId: varchar('google_id', { length: 255 }).unique(),
   isVerified: boolean('is_verified').default(false).notNull(),
+  isGuest: boolean('is_guest').default(false).notNull(),
   googleRefreshToken: varchar('google_refresh_token', { length: 500 }),
   gmailHistoryId: varchar('gmail_history_id', { length: 100 }),
   createdAt: timestamp('created_at').defaultNow().notNull(),
